@@ -748,6 +748,56 @@ Suggest themes, storylines, key questions to answer, and unique perspectives."""
     return jsonify({"result": result})
 
 
+@app.route("/api/ai/episode-research", methods=["POST"])
+def ai_episode_research():
+    """Generate research for a specific episode."""
+    data = request.get_json()
+    episode_id = data.get('episodeId', '')
+    episode_title = data.get('episodeTitle', '')
+    episode_description = data.get('episodeDescription', '')
+    project_title = data.get('projectTitle', '')
+    project_description = data.get('projectDescription', '')
+    project_id = data.get('projectId', '')
+
+    system_prompt = f"""You are a documentary research specialist. Generate comprehensive research notes for a specific episode of a documentary series.
+
+Project: {project_title}
+Project Description: {project_description}
+
+Your research should include:
+1. **Key Facts & Background** - Essential verified information about the episode's topic
+2. **Potential Sources** - Archives, institutions, databases, and experts to contact
+3. **Visual/Audio Assets** - Potential footage, photos, or audio that could be acquired
+4. **Interview Subjects** - People who could provide firsthand accounts or expertise
+5. **Key Questions to Answer** - What the episode needs to address
+6. **Timeline/Chronology** - Important dates and sequence of events if applicable
+
+Focus on ACTIONABLE research that will help produce this episode. Include specific names, organizations, and contact points where possible."""
+
+    prompt = f"""Generate detailed research notes for this documentary episode:
+
+Episode Title: {episode_title}
+Episode Description: {episode_description}
+
+Provide thorough, production-ready research that the documentary team can immediately act upon."""
+
+    result = generate_ai_response(prompt, system_prompt)
+
+    # Auto-save as research linked to this episode
+    if project_id and episode_id:
+        research_data = {
+            'projectId': project_id,
+            'episodeId': episode_id,
+            'title': f"Research: {episode_title}",
+            'content': result,
+            'category': 'Episode Research'
+        }
+        saved_research = create_doc('research', research_data)
+        return jsonify({"result": result, "saved": True, "researchId": saved_research['id']})
+
+    return jsonify({"result": result, "saved": False})
+
+
 @app.route("/api/ai/generate-topics", methods=["POST"])
 def ai_generate_topics():
     """Generate episode topics from project title and description."""

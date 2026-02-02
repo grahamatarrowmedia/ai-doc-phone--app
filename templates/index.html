@@ -555,29 +555,282 @@
         }
 
         function renderEpisodes() {
+            // Count episodes with research
+            const episodesWithResearch = state.episodes.filter(ep =>
+                state.research.some(r => r.episodeId === ep.id)
+            ).length;
+            const episodesWithoutResearch = state.episodes.length - episodesWithResearch;
+
             return `
                 <div class="section-header">
                     <h2>Episodes</h2>
-                    <button class="btn btn-primary" onclick="showAddModal('episode')">+ Add</button>
+                    <div class="flex gap-2">
+                        ${state.episodes.length > 0 ? `
+                            <button class="ai-button" onclick="showGenerateAllResearchModal()">
+                                ✨ Generate All Research
+                            </button>
+                        ` : ''}
+                        <button class="btn btn-primary" onclick="showAddModal('episode')">+ Add</button>
+                    </div>
                 </div>
-                ${state.episodes.map(ep => `
-                    <div class="card">
-                        <div class="item-header">
-                            <div class="flex-1">
-                                <h3>${ep.title}</h3>
-                                <p>${ep.description}</p>
-                                <div class="flex gap-2 mt-2">
-                                    <span class="text-sm text-muted">${ep.duration}</span>
-                                    <span class="badge badge-gray">${ep.status}</span>
+                ${episodesWithoutResearch > 0 && state.episodes.length > 1 ? `
+                    <div class="info-banner mb-3">
+                        <span>${episodesWithoutResearch} episode${episodesWithoutResearch > 1 ? 's' : ''} without research</span>
+                    </div>
+                ` : ''}
+                ${state.episodes.map(ep => {
+                    const episodeResearch = state.research.filter(r => r.episodeId === ep.id);
+                    const hasResearch = episodeResearch.length > 0;
+                    return `
+                        <div class="card episode-card">
+                            <div class="item-header">
+                                <div class="flex-1">
+                                    <h3>${ep.title}</h3>
+                                    <p>${ep.description}</p>
+                                    <div class="flex gap-2 mt-2">
+                                        <span class="text-sm text-muted">${ep.duration || ''}</span>
+                                        <span class="badge badge-gray">${ep.status}</span>
+                                        ${hasResearch ? `<span class="badge badge-green">📚 ${episodeResearch.length} research</span>` : ''}
+                                    </div>
+                                </div>
+                                <div class="item-actions">
+                                    <button class="btn-icon" onclick="showEditModal('episode', '${ep.id}')">✏️</button>
+                                    <button class="btn-icon" onclick="deleteItem('episodes', '${ep.id}')">🗑️</button>
                                 </div>
                             </div>
-                            <div class="item-actions">
-                                <button class="btn-icon" onclick="showEditModal('episode', '${ep.id}')">✏️</button>
-                                <button class="btn-icon" onclick="deleteItem('episodes', '${ep.id}')">🗑️</button>
+
+                            <!-- Episode Research Section -->
+                            <div class="episode-research-section">
+                                <div class="episode-research-header">
+                                    <span class="text-sm font-bold">Research</span>
+                                    <button class="ai-button-sm" onclick="generateEpisodeResearch('${ep.id}', '${ep.title.replace(/'/g, "\\'")}', '${(ep.description || '').replace(/'/g, "\\'")}')">
+                                        ✨ Generate
+                                    </button>
+                                </div>
+                                ${hasResearch ? `
+                                    <div class="episode-research-list">
+                                        ${episodeResearch.map(r => `
+                                            <div class="episode-research-item">
+                                                <div class="episode-research-content" onclick="toggleResearchExpand(this)">
+                                                    <div class="episode-research-title">${r.title}</div>
+                                                    <div class="episode-research-preview">${(r.content || '').substring(0, 150)}...</div>
+                                                    <div class="episode-research-full" style="display:none;">${marked.parse(r.content || '')}</div>
+                                                </div>
+                                                <button class="btn-icon btn-icon-sm" onclick="deleteItem('research', '${r.id}')">🗑️</button>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                ` : `
+                                    <p class="text-sm text-muted">No research yet. Click Generate to create research for this episode.</p>
+                                `}
                             </div>
                         </div>
+                    `;
+                }).join('')}
+            `;
+        }
+
+        function toggleResearchExpand(element) {
+            const preview = element.querySelector('.episode-research-preview');
+            const full = element.querySelector('.episode-research-full');
+            if (preview.style.display === 'none') {
+                preview.style.display = 'block';
+                full.style.display = 'none';
+            } else {
+                preview.style.display = 'none';
+                full.style.display = 'block';
+            }
+        }
+
+        async function generateEpisodeResearch(episodeId, title, description) {
+            const modal = document.getElementById('ai-modal');
+            const content = document.getElementById('ai-modal-content');
+
+            content.innerHTML = `
+                <div class="ai-section">
+                    <h4>✨ Generating Research...</h4>
+                    <p class="text-sm text-muted mb-3">Creating research for "${title}"</p>
+                    <div class="loading-state">
+                        <div class="spinner"></div>
+                        <p>Researching topic...</p>
                     </div>
-                `).join('')}
+                </div>
+            `;
+            modal.classList.add('active');
+
+            try {
+                const response = await api('/api/ai/episode-research', 'POST', {
+                    episodeId,
+                    episodeTitle: title,
+                    episodeDescription: description,
+                    projectId: state.selectedProject,
+                    projectTitle: state.project?.title || '',
+                    projectDescription: state.project?.description || ''
+                });
+
+                content.innerHTML = `
+                    <div class="ai-section">
+                        <h4>✅ Research Generated</h4>
+                        <p class="text-sm text-muted mb-3">Research for "${title}" has been saved.</p>
+                        <div class="ai-result">
+                            <div class="ai-result-content">${marked.parse(response.result)}</div>
+                        </div>
+                        <button class="btn btn-primary mt-3" onclick="closeAIModal(); loadProjectData();">Done</button>
+                    </div>
+                `;
+            } catch (error) {
+                content.innerHTML = `
+                    <div class="ai-section">
+                        <h4>Error</h4>
+                        <p class="text-muted">Failed to generate research: ${error.message}</p>
+                        <button class="btn btn-primary mt-3" onclick="closeAIModal()">Close</button>
+                    </div>
+                `;
+            }
+        }
+
+        function showGenerateAllResearchModal() {
+            const modal = document.getElementById('ai-modal');
+            const content = document.getElementById('ai-modal-content');
+
+            const episodesWithResearch = state.episodes.filter(ep =>
+                state.research.some(r => r.episodeId === ep.id)
+            );
+            const episodesWithoutResearch = state.episodes.filter(ep =>
+                !state.research.some(r => r.episodeId === ep.id)
+            );
+
+            content.innerHTML = `
+                <div class="ai-section">
+                    <h4>✨ Generate Research for All Episodes</h4>
+                    <p class="text-sm text-muted mb-3">AI will generate research notes for each selected episode.</p>
+
+                    <div class="generate-all-options mb-3">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="skip-with-research" checked>
+                            <span>Skip episodes that already have research (${episodesWithResearch.length} episodes)</span>
+                        </label>
+                    </div>
+
+                    <div class="episode-select-list">
+                        <div class="episode-select-header">
+                            <span class="text-sm font-bold">Episodes to process:</span>
+                            <button class="btn-link text-sm" onclick="toggleAllEpisodeSelection(true)">Select All</button>
+                            <button class="btn-link text-sm" onclick="toggleAllEpisodeSelection(false)">Deselect All</button>
+                        </div>
+                        ${state.episodes.map(ep => {
+                            const hasResearch = state.research.some(r => r.episodeId === ep.id);
+                            return `
+                                <label class="episode-select-item ${hasResearch ? 'has-research' : ''}">
+                                    <input type="checkbox" class="episode-checkbox" data-episode-id="${ep.id}"
+                                           data-title="${ep.title.replace(/"/g, '&quot;')}"
+                                           data-description="${(ep.description || '').replace(/"/g, '&quot;')}"
+                                           ${!hasResearch ? 'checked' : ''}>
+                                    <div class="episode-select-info">
+                                        <span class="episode-select-title">${ep.title}</span>
+                                        ${hasResearch ? '<span class="badge badge-green badge-sm">Has Research</span>' : ''}
+                                    </div>
+                                </label>
+                            `;
+                        }).join('')}
+                    </div>
+
+                    <div class="form-actions mt-3">
+                        <button class="btn btn-secondary" onclick="closeAIModal()">Cancel</button>
+                        <button class="btn btn-primary" onclick="generateAllEpisodeResearch()">Generate Research</button>
+                    </div>
+                </div>
+            `;
+            modal.classList.add('active');
+
+            // Update checkbox states based on skip option
+            document.getElementById('skip-with-research').addEventListener('change', function() {
+                const skipChecked = this.checked;
+                document.querySelectorAll('.episode-select-item.has-research input').forEach(cb => {
+                    cb.checked = !skipChecked;
+                });
+            });
+        }
+
+        function toggleAllEpisodeSelection(selectAll) {
+            document.querySelectorAll('.episode-checkbox').forEach(cb => {
+                cb.checked = selectAll;
+            });
+        }
+
+        async function generateAllEpisodeResearch() {
+            const checkboxes = document.querySelectorAll('.episode-checkbox:checked');
+            const episodes = [];
+
+            checkboxes.forEach(cb => {
+                episodes.push({
+                    id: cb.dataset.episodeId,
+                    title: cb.dataset.title,
+                    description: cb.dataset.description
+                });
+            });
+
+            if (episodes.length === 0) {
+                alert('Please select at least one episode.');
+                return;
+            }
+
+            const content = document.getElementById('ai-modal-content');
+            let completed = 0;
+
+            content.innerHTML = `
+                <div class="ai-section">
+                    <h4>✨ Generating Research...</h4>
+                    <div class="progress-info">
+                        <p>Processing <span id="progress-current">0</span> of ${episodes.length} episodes</p>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+                        </div>
+                        <p id="progress-episode" class="text-sm text-muted mt-2"></p>
+                    </div>
+                </div>
+            `;
+
+            const results = [];
+            for (const ep of episodes) {
+                document.getElementById('progress-episode').textContent = `Researching: ${ep.title}`;
+
+                try {
+                    const response = await api('/api/ai/episode-research', 'POST', {
+                        episodeId: ep.id,
+                        episodeTitle: ep.title,
+                        episodeDescription: ep.description,
+                        projectId: state.selectedProject,
+                        projectTitle: state.project?.title || '',
+                        projectDescription: state.project?.description || ''
+                    });
+                    results.push({ episode: ep.title, success: true });
+                } catch (error) {
+                    results.push({ episode: ep.title, success: false, error: error.message });
+                }
+
+                completed++;
+                document.getElementById('progress-current').textContent = completed;
+                document.getElementById('progress-fill').style.width = `${(completed / episodes.length) * 100}%`;
+            }
+
+            const successful = results.filter(r => r.success).length;
+            const failed = results.filter(r => !r.success).length;
+
+            content.innerHTML = `
+                <div class="ai-section">
+                    <h4>✅ Research Generation Complete</h4>
+                    <p class="mb-3">${successful} of ${episodes.length} episodes processed successfully.</p>
+                    ${failed > 0 ? `
+                        <div class="error-list mb-3">
+                            <p class="text-sm font-bold">Failed:</p>
+                            ${results.filter(r => !r.success).map(r => `
+                                <p class="text-sm text-muted">• ${r.episode}: ${r.error}</p>
+                            `).join('')}
+                        </div>
+                    ` : ''}
+                    <button class="btn btn-primary" onclick="closeAIModal(); loadProjectData();">Done</button>
+                </div>
             `;
         }
 
