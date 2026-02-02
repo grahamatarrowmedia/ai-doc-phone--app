@@ -1,6 +1,7 @@
 /* Documentary Production App - Mobile-first CSS */
 
-:root {
+:root,
+[data-theme="light"] {
     --primary: #2563eb;
     --primary-dark: #1d4ed8;
     --secondary: #9333ea;
@@ -15,6 +16,33 @@
     --gray-700: #374151;
     --gray-900: #111827;
     --white: #ffffff;
+    --card-bg: #ffffff;
+    --body-bg: #f3f4f6;
+    --text-primary: #111827;
+    --text-secondary: #6b7280;
+    --border-color: #e5e7eb;
+}
+
+[data-theme="dark"] {
+    --primary: #3b82f6;
+    --primary-dark: #2563eb;
+    --secondary: #a855f7;
+    --success: #10b981;
+    --warning: #f97316;
+    --error: #ef4444;
+    --gray-50: #1f2937;
+    --gray-100: #1f2937;
+    --gray-200: #374151;
+    --gray-300: #4b5563;
+    --gray-500: #9ca3af;
+    --gray-700: #d1d5db;
+    --gray-900: #f9fafb;
+    --white: #111827;
+    --card-bg: #1f2937;
+    --body-bg: #111827;
+    --text-primary: #f9fafb;
+    --text-secondary: #9ca3af;
+    --border-color: #374151;
 }
 
 * {
@@ -25,10 +53,11 @@
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: var(--gray-100);
-    color: var(--gray-900);
+    background: var(--body-bg);
+    color: var(--text-primary);
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
+    transition: background-color 0.3s, color 0.3s;
 }
 
 /* Container */
@@ -48,6 +77,12 @@ body {
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
+.header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
 .header h1 {
     font-size: 1.5rem;
     font-weight: 700;
@@ -59,6 +94,35 @@ body {
     margin-top: 0.25rem;
 }
 
+.header-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.header-btn {
+    background: rgba(255,255,255,0.2);
+    border: 1px solid rgba(255,255,255,0.3);
+    color: white;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.header-btn:hover {
+    background: rgba(255,255,255,0.3);
+}
+
+.project-name-clickable {
+    cursor: pointer;
+    display: inline-block;
+}
+
+.project-name-clickable:hover {
+    opacity: 0.8;
+}
+
 /* Content */
 .content {
     padding: 1rem;
@@ -66,21 +130,24 @@ body {
 
 /* Cards */
 .card {
-    background: var(--white);
+    background: var(--card-bg);
     border-radius: 0.75rem;
     padding: 1rem;
     margin-bottom: 1rem;
     box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    border: 1px solid var(--border-color);
+    transition: background-color 0.3s, border-color 0.3s;
 }
 
 .card h3 {
     font-size: 1.125rem;
     font-weight: 600;
     margin-bottom: 0.5rem;
+    color: var(--text-primary);
 }
 
 .card p {
-    color: var(--gray-500);
+    color: var(--text-secondary);
     font-size: 0.875rem;
 }
 
@@ -99,11 +166,12 @@ body {
 }
 
 .stat-card {
-    background: var(--white);
+    background: var(--card-bg);
     border-radius: 0.75rem;
     padding: 1rem;
     text-align: center;
     box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    border: 1px solid var(--border-color);
 }
 
 .stat-number {
@@ -260,12 +328,13 @@ body {
     bottom: 0;
     left: 0;
     right: 0;
-    background: var(--white);
-    border-top: 1px solid var(--gray-200);
+    background: var(--card-bg);
+    border-top: 1px solid var(--border-color);
     display: flex;
     justify-content: space-around;
     padding: 0.5rem 0.25rem;
     z-index: 100;
+    transition: background-color 0.3s, border-color 0.3s;
 }
 
 .nav-item {
@@ -310,12 +379,13 @@ body {
 }
 
 .modal-content {
-    background: var(--white);
+    background: var(--card-bg);
     border-radius: 0.75rem;
     max-width: 600px;
     width: 100%;
     max-height: 90vh;
     overflow-y: auto;
+    border: 1px solid var(--border-color);
 }
 
 .modal-header {
@@ -323,7 +393,7 @@ body {
     justify-content: space-between;
     align-items: center;
     padding: 1rem;
-    border-bottom: 1px solid var(--gray-200);
+    border-bottom: 1px solid var(--border-color);
 }
 
 .modal-header h3 {
@@ -353,11 +423,14 @@ body {
 input, textarea, select {
     width: 100%;
     padding: 0.75rem;
-    border: 1px solid var(--gray-300);
+    border: 1px solid var(--border-color);
     border-radius: 0.5rem;
     margin-bottom: 0.75rem;
     font-size: 1rem;
     font-family: inherit;
+    background: var(--card-bg);
+    color: var(--text-primary);
+    transition: background-color 0.3s, border-color 0.3s, color 0.3s;
 }
 
 input:focus, textarea:focus, select:focus {
@@ -451,6 +524,13 @@ textarea {
     transform: none;
 }
 
+/* Support for regular form inputs with mic */
+.input-with-mic input,
+.input-with-mic textarea {
+    padding-right: 3rem;
+    margin-bottom: 0;
+}
+
 /* Checkbox */
 .checkbox-label {
     display: flex;
@@ -466,6 +546,64 @@ textarea {
     width: auto;
     margin: 0;
     cursor: pointer;
+}
+
+/* Projects Modal */
+.projects-list {
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 1rem;
+}
+
+.project-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    border: 1px solid var(--gray-200);
+    border-radius: 0.5rem;
+    margin-bottom: 0.5rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.project-item:hover {
+    border-color: var(--primary);
+    background: var(--gray-50);
+}
+
+.project-item.active {
+    border-color: var(--primary);
+    background: #dbeafe;
+}
+
+.project-item-info h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.project-item-info p {
+    font-size: 0.8125rem;
+    color: var(--gray-500);
+    margin-bottom: 0.5rem;
+}
+
+.project-active-badge {
+    color: var(--success);
+    font-weight: 600;
+    font-size: 0.875rem;
+}
+
+.projects-actions {
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--gray-200);
+}
+
+#new-project-form {
+    padding-top: 1rem;
+    border-top: 1px solid var(--gray-200);
+    margin-top: 1rem;
 }
 
 .ai-result {

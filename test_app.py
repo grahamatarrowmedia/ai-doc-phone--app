@@ -95,8 +95,37 @@ def create_project():
     data = request.get_json()
     data['id'] = str(uuid.uuid4())
     data['createdAt'] = datetime.utcnow().isoformat()
+    data['updatedAt'] = datetime.utcnow().isoformat()
     storage['projects'].append(data)
     return jsonify(data), 201
+
+
+@app.route("/api/projects/<project_id>", methods=["GET"])
+def get_project(project_id):
+    project = next((p for p in storage['projects'] if p['id'] == project_id), None)
+    if project:
+        return jsonify(project)
+    return jsonify({"error": "Project not found"}), 404
+
+
+@app.route("/api/projects/<project_id>", methods=["PUT"])
+def update_project(project_id):
+    data = request.get_json()
+    for i, project in enumerate(storage['projects']):
+        if project['id'] == project_id:
+            storage['projects'][i].update(data)
+            storage['projects'][i]['updatedAt'] = datetime.utcnow().isoformat()
+            return jsonify(storage['projects'][i])
+    return jsonify({"error": "Project not found"}), 404
+
+
+@app.route("/api/projects/<project_id>", methods=["DELETE"])
+def delete_project(project_id):
+    storage['projects'] = [p for p in storage['projects'] if p['id'] != project_id]
+    # Also delete related data
+    for collection in ['episodes', 'research', 'interviews', 'shots', 'assets', 'scripts']:
+        storage[collection] = [item for item in storage[collection] if item.get('projectId') != project_id]
+    return jsonify({"success": True})
 
 
 @app.route("/api/init-sample-data", methods=["POST"])
