@@ -173,6 +173,7 @@
                 state.assets = assets || [];
                 state.scripts = scripts || [];
 
+                renderNav();
                 render();
             } catch (error) {
                 console.error('Error loading data:', error);
