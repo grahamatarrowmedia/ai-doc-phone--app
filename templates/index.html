@@ -223,6 +223,10 @@
                             <option value="In Production">In Production</option>
                             <option value="Post-Production">Post-Production</option>
                         </select>
+                        <div class="episode-count-field">
+                            <label for="new-project-episodes">Number of episodes to generate:</label>
+                            <input type="number" id="new-project-episodes" min="1" max="20" value="5">
+                        </div>
                         <div class="form-actions">
                             <button type="button" class="btn btn-secondary" onclick="closeProjectsModal()">Cancel</button>
                             <button type="submit" class="btn btn-primary">Create Project</button>
@@ -276,6 +280,10 @@
                             <option value="In Production">In Production</option>
                             <option value="Post-Production">Post-Production</option>
                         </select>
+                        <div class="episode-count-field">
+                            <label for="new-project-episodes">Number of episodes to generate:</label>
+                            <input type="number" id="new-project-episodes" min="1" max="20" value="5">
+                        </div>
                         <div class="form-actions">
                             <button type="button" class="btn btn-secondary" onclick="hideNewProjectForm()">Cancel</button>
                             <button type="submit" class="btn btn-primary">Create Project</button>
@@ -311,6 +319,7 @@
             const title = document.getElementById('new-project-title').value;
             const description = document.getElementById('new-project-description').value;
             const status = document.getElementById('new-project-status').value;
+            const numEpisodes = parseInt(document.getElementById('new-project-episodes').value) || 5;
 
             try {
                 const newProject = await api('/api/projects', 'POST', {
@@ -324,19 +333,19 @@
                 await loadProjectData();
 
                 // Generate episode topics for the new project
-                showTopicSuggestions(newProject.id, title, description);
+                showTopicSuggestions(newProject.id, title, description, numEpisodes);
             } catch (error) {
                 alert('Error creating project: ' + error.message);
             }
         }
 
-        async function showTopicSuggestions(projectId, title, description) {
+        async function showTopicSuggestions(projectId, title, description, numEpisodes = 5) {
             const modal = document.getElementById('ai-modal');
             const content = document.getElementById('ai-modal-content');
 
             content.innerHTML = `
                 <div class="ai-section">
-                    <h4>✨ Generating Episode Ideas...</h4>
+                    <h4>✨ Generating ${numEpisodes} Episode Ideas...</h4>
                     <p class="text-sm text-muted mb-3">Based on your project, we're suggesting episode topics.</p>
                     <div class="loading-state">
                         <div class="spinner"></div>
@@ -350,7 +359,7 @@
                 const response = await api('/api/ai/generate-topics', 'POST', {
                     title,
                     description,
-                    numTopics: 5
+                    numTopics: numEpisodes
                 });
 
                 if (response.topics && response.topics.length > 0) {
