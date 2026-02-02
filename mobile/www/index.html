@@ -2,10 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Documentary Production App</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-    <link rel="manifest" href="/static/manifest.json">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Documentary Production</title>
+    <link rel="stylesheet" href="css/style.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script>
         // Configure marked for better rendering
@@ -13,7 +12,7 @@
             breaks: true,
             gfm: true
         });
-        // Custom renderer to open links in new tab
+        // Custom renderer to open links in system browser
         const renderer = new marked.Renderer();
         renderer.link = function(href, title, text) {
             const titleAttr = title ? ` title="${title}"` : '';
@@ -24,17 +23,55 @@
     <meta name="theme-color" content="#2563eb">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="icon" type="image/svg+xml" href="icons/icon-192.svg">
+    <link rel="apple-touch-icon" href="icons/icon-192.svg">
+    <style>
+        /* Offline banner styles */
+        .offline-banner {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: #dc2626;
+            color: white;
+            text-align: center;
+            padding: 0.75rem 1rem;
+            font-size: 0.875rem;
+            font-weight: 600;
+            z-index: 9999;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .offline-banner.show {
+            display: block;
+        }
+        body.offline .container {
+            padding-top: 48px;
+        }
+        /* Safe area insets for notched devices */
+        .header {
+            padding-top: max(1rem, env(safe-area-inset-top));
+        }
+        .nav {
+            padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+        }
+    </style>
 </head>
 <body>
+    <!-- Offline Banner -->
+    <div id="offline-banner" class="offline-banner">
+        No internet connection. Please check your network.
+    </div>
+
     <div id="app">
         <div class="container">
             <!-- Header -->
             <header class="header">
                 <div class="header-top">
-                    <h1>📽️ Documentary Production</h1>
+                    <h1>Documentary Production</h1>
                     <div class="header-actions">
-                        <button class="header-btn" onclick="toggleTheme()" id="theme-btn" title="Toggle dark/light mode">🌙</button>
-                        <button class="header-btn" onclick="showProjectsModal()">📁 Projects</button>
+                        <button class="header-btn" onclick="toggleTheme()" id="theme-btn" title="Toggle dark/light mode">dark</button>
+                        <button class="header-btn" onclick="showProjectsModal()">Projects</button>
                     </div>
                 </div>
                 <p id="project-name" class="project-name-clickable" onclick="showProjectsModal()">Loading...</p>
@@ -68,7 +105,7 @@
     <div id="ai-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>✨ AI Assistant</h3>
+                <h3>AI Assistant</h3>
                 <button onclick="closeAIModal()" class="close-btn">&times;</button>
             </div>
             <div id="ai-modal-content"></div>
@@ -79,7 +116,7 @@
     <div id="projects-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>📁 Projects</h3>
+                <h3>Projects</h3>
                 <button onclick="closeProjectsModal()" class="close-btn">&times;</button>
             </div>
             <div id="projects-modal-content"></div>
@@ -87,6 +124,35 @@
     </div>
 
     <script>
+        // ============== API Configuration ==============
+        // This will be overridden by Capacitor's server config
+        // For local development, use the Cloud Run URL directly
+        const API_BASE = '';  // Empty for relative URLs (Capacitor handles this)
+
+        // ============== Offline Detection ==============
+        let isOnline = navigator.onLine;
+
+        function updateOnlineStatus() {
+            isOnline = navigator.onLine;
+            const banner = document.getElementById('offline-banner');
+            const body = document.body;
+
+            if (!isOnline) {
+                banner.classList.add('show');
+                body.classList.add('offline');
+            } else {
+                banner.classList.remove('show');
+                body.classList.remove('offline');
+                // Reload data when coming back online
+                if (state.selectedProject) {
+                    loadProjectData();
+                }
+            }
+        }
+
+        window.addEventListener('online', updateOnlineStatus);
+        window.addEventListener('offline', updateOnlineStatus);
+
         // App State
         const state = {
             activeTab: 'dashboard',
@@ -104,25 +170,32 @@
 
         // Navigation items
         const navItems = [
-            { id: 'dashboard', icon: '📊', label: 'Dashboard' },
-            { id: 'episodes', icon: '📝', label: 'Episodes' },
-            { id: 'research', icon: '🔍', label: 'Research' },
-            { id: 'interviews', icon: '👥', label: 'Interviews' },
-            { id: 'production', icon: '🎬', label: 'Production' },
-            { id: 'assets', icon: '📦', label: 'Assets' },
-            { id: 'scripts', icon: '📄', label: 'Scripts' }
+            { id: 'dashboard', icon: 'D', label: 'Dashboard' },
+            { id: 'episodes', icon: 'E', label: 'Episodes' },
+            { id: 'research', icon: 'R', label: 'Research' },
+            { id: 'interviews', icon: 'I', label: 'Interviews' },
+            { id: 'production', icon: 'P', label: 'Production' },
+            { id: 'assets', icon: 'A', label: 'Assets' },
+            { id: 'scripts', icon: 'S', label: 'Scripts' }
         ];
 
         // ============== API Functions ==============
 
         async function api(endpoint, method = 'GET', data = null) {
+            if (!isOnline) {
+                throw new Error('No internet connection');
+            }
+
             const options = {
                 method,
                 headers: { 'Content-Type': 'application/json' }
             };
             if (data) options.body = JSON.stringify(data);
 
-            const response = await fetch(endpoint, options);
+            const response = await fetch(API_BASE + endpoint, options);
+            if (!response.ok) {
+                throw new Error(`API error: ${response.status}`);
+            }
             return response.json();
         }
 
@@ -145,7 +218,7 @@
                         state.selectedProject = projects[0].id;
                     }
                     state.project = projects.find(p => p.id === state.selectedProject);
-                    document.getElementById('project-name').textContent = state.project.title + ' ▼';
+                    document.getElementById('project-name').textContent = state.project.title + ' [tap to switch]';
 
                     // Load all related data
                     const [episodes, research, interviews, shots, assets, scripts] = await Promise.all([
@@ -194,8 +267,8 @@
                                 <span class="badge badge-blue">${p.status || 'Active'}</span>
                             </div>
                             <div class="project-item-actions">
-                                ${p.id === state.selectedProject ? '<span class="project-active-badge">✓ Active</span>' : ''}
-                                <button class="btn-icon delete-project-btn" onclick="deleteProject('${p.id}', '${p.title.replace(/'/g, "\\'")}')" title="Delete project">🗑️</button>
+                                ${p.id === state.selectedProject ? '<span class="project-active-badge">Active</span>' : ''}
+                                <button class="btn-icon delete-project-btn" onclick="deleteProject('${p.id}', '${p.title.replace(/'/g, "\\'")}')" title="Delete project">X</button>
                             </div>
                         </div>
                     `).join('')}
@@ -208,11 +281,11 @@
                     <form onsubmit="createNewProject(event)">
                         <div class="input-with-mic">
                             <input type="text" id="new-project-title" placeholder="Project title" required>
-                            <button type="button" class="mic-btn" data-for="new-project-title" onclick="toggleSpeech('new-project-title')" title="Speak">🎤</button>
+                            <button type="button" class="mic-btn" data-for="new-project-title" onclick="toggleSpeech('new-project-title')" title="Speak">mic</button>
                         </div>
                         <div class="input-with-mic">
                             <textarea id="new-project-description" placeholder="Brief description of your documentary" rows="3"></textarea>
-                            <button type="button" class="mic-btn" data-for="new-project-description" onclick="toggleSpeech('new-project-description')" title="Speak">🎤</button>
+                            <button type="button" class="mic-btn" data-for="new-project-description" onclick="toggleSpeech('new-project-description')" title="Speak">mic</button>
                         </div>
                         <select id="new-project-status">
                             <option value="Planning">Planning</option>
@@ -280,7 +353,7 @@
 
             content.innerHTML = `
                 <div class="ai-section">
-                    <h4>✨ Generating Episode Ideas...</h4>
+                    <h4>Generating Episode Ideas...</h4>
                     <p class="text-sm text-muted mb-3">Based on your project, we're suggesting episode topics.</p>
                     <div class="loading-state">
                         <div class="spinner"></div>
@@ -300,7 +373,7 @@
                 if (response.topics && response.topics.length > 0) {
                     content.innerHTML = `
                         <div class="ai-section">
-                            <h4>📝 Suggested Episodes</h4>
+                            <h4>Suggested Episodes</h4>
                             <p class="text-sm text-muted mb-3">Select which episodes to create for your documentary.</p>
                             <div class="topic-list">
                                 ${response.topics.map((topic, i) => `
@@ -317,14 +390,14 @@
                             </div>
                             <div class="form-actions mt-3">
                                 <button class="btn btn-secondary" onclick="closeAIModal()">Skip</button>
-                                <button class="btn btn-primary" onclick="createSelectedEpisodes('${projectId}')">Create Selected Episodes</button>
+                                <button class="btn btn-primary" onclick="createSelectedEpisodes('${projectId}')">Create Selected</button>
                             </div>
                         </div>
                     `;
                 } else {
                     content.innerHTML = `
                         <div class="ai-section">
-                            <h4>📝 Episode Ideas</h4>
+                            <h4>Episode Ideas</h4>
                             <p class="text-muted">Could not generate suggestions. You can add episodes manually.</p>
                             ${response.error ? `<p class="text-sm text-muted">Error: ${response.error}</p>` : ''}
                             <button class="btn btn-primary mt-3" onclick="closeAIModal()">Continue</button>
@@ -334,7 +407,7 @@
             } catch (error) {
                 content.innerHTML = `
                     <div class="ai-section">
-                        <h4>📝 Episode Ideas</h4>
+                        <h4>Episode Ideas</h4>
                         <p class="text-muted">Could not generate suggestions: ${error.message}</p>
                         <button class="btn btn-primary mt-3" onclick="closeAIModal()">Continue</button>
                     </div>
@@ -418,7 +491,7 @@
             const nav = document.getElementById('nav');
             nav.innerHTML = navItems.map(item => `
                 <button class="nav-item ${state.activeTab === item.id ? 'active' : ''}" onclick="setTab('${item.id}')">
-                    <span>${item.icon}</span>
+                    <span class="nav-icon">${item.icon}</span>
                     <span>${item.label}</span>
                 </button>
             `).join('');
@@ -453,7 +526,7 @@
                     <div class="flex gap-2 mt-3">
                         <span class="badge badge-blue">${state.project.status}</span>
                         <button class="ai-button" onclick="showAIModal('expand-topic', {topic: '${state.project.description}'})">
-                            ✨ Explore Ideas
+                            AI Explore Ideas
                         </button>
                     </div>
                 </div>
@@ -514,8 +587,8 @@
                                 </div>
                             </div>
                             <div class="item-actions">
-                                <button class="btn-icon" onclick="showEditModal('episode', '${ep.id}')">✏️</button>
-                                <button class="btn-icon" onclick="deleteItem('episodes', '${ep.id}')">🗑️</button>
+                                <button class="btn-icon" onclick="showEditModal('episode', '${ep.id}')">edit</button>
+                                <button class="btn-icon" onclick="deleteItem('episodes', '${ep.id}')">del</button>
                             </div>
                         </div>
                     </div>
@@ -528,7 +601,7 @@
                 <div class="section-header">
                     <h2>Research</h2>
                     <div class="flex gap-2">
-                        <button class="ai-button" onclick="showAIModal('research')">✨ AI Research</button>
+                        <button class="ai-button" onclick="showAIModal('research')">AI Research</button>
                         <button class="btn btn-primary" onclick="showAddModal('research')">+ Add</button>
                     </div>
                 </div>
@@ -543,8 +616,8 @@
                                 <div class="research-content">${marked.parse(r.content || '')}</div>
                             </div>
                             <div class="item-actions">
-                                <button class="btn-icon" onclick="showEditModal('research', '${r.id}')">✏️</button>
-                                <button class="btn-icon" onclick="deleteItem('research', '${r.id}')">🗑️</button>
+                                <button class="btn-icon" onclick="showEditModal('research', '${r.id}')">edit</button>
+                                <button class="btn-icon" onclick="deleteItem('research', '${r.id}')">del</button>
                             </div>
                         </div>
                     </div>
@@ -557,7 +630,7 @@
                 <div class="section-header">
                     <h2>Interviews</h2>
                     <div class="flex gap-2">
-                        <button class="ai-button" onclick="showAIModal('interview')">✨ AI Questions</button>
+                        <button class="ai-button" onclick="showAIModal('interview')">AI Questions</button>
                         <button class="btn btn-primary" onclick="showAddModal('interview')">+ Add</button>
                     </div>
                 </div>
@@ -577,8 +650,8 @@
                                 ${i.notes ? `<div class="mt-2 text-sm text-muted italic">${i.notes}</div>` : ''}
                             </div>
                             <div class="item-actions">
-                                <button class="btn-icon" onclick="showEditModal('interview', '${i.id}')">✏️</button>
-                                <button class="btn-icon" onclick="deleteItem('interviews', '${i.id}')">🗑️</button>
+                                <button class="btn-icon" onclick="showEditModal('interview', '${i.id}')">edit</button>
+                                <button class="btn-icon" onclick="deleteItem('interviews', '${i.id}')">del</button>
                             </div>
                         </div>
                     </div>
@@ -591,7 +664,7 @@
                 <div class="section-header">
                     <h2>Production</h2>
                     <div class="flex gap-2">
-                        <button class="ai-button" onclick="showAIModal('shot-ideas')">✨ Shot Ideas</button>
+                        <button class="ai-button" onclick="showAIModal('shot-ideas')">AI Shot Ideas</button>
                         <button class="btn btn-primary" onclick="showAddModal('shot')">+ Add</button>
                     </div>
                 </div>
@@ -604,15 +677,15 @@
                                     ${episode ? `<div class="text-xs mb-1" style="color: #2563eb;">${episode.title}</div>` : ''}
                                     <p class="font-bold">${s.description}</p>
                                     <div class="text-sm mt-1 text-muted">
-                                        <div>📍 ${s.location}</div>
-                                        <div>🎥 ${s.equipment}</div>
-                                        ${s.shootDate ? `<div>📅 ${new Date(s.shootDate).toLocaleDateString()}</div>` : ''}
+                                        <div>Location: ${s.location}</div>
+                                        <div>Equipment: ${s.equipment}</div>
+                                        ${s.shootDate ? `<div>Date: ${new Date(s.shootDate).toLocaleDateString()}</div>` : ''}
                                     </div>
                                     <span class="badge badge-purple mt-2">${s.status}</span>
                                 </div>
                                 <div class="item-actions">
-                                    <button class="btn-icon" onclick="showEditModal('shot', '${s.id}')">✏️</button>
-                                    <button class="btn-icon" onclick="deleteItem('shots', '${s.id}')">🗑️</button>
+                                    <button class="btn-icon" onclick="showEditModal('shot', '${s.id}')">edit</button>
+                                    <button class="btn-icon" onclick="deleteItem('shots', '${s.id}')">del</button>
                                 </div>
                             </div>
                         </div>
@@ -636,12 +709,12 @@
                     <div class="card">
                         <div class="source-docs-header">
                             <div>
-                                <h3 class="mb-1">📄 Source Documents (${sourceAssets.length})</h3>
+                                <h3 class="mb-1">Source Documents (${sourceAssets.length})</h3>
                                 <p class="text-sm text-muted">Auto-archived from AI research for verification</p>
                             </div>
                             <div class="source-docs-bulk-actions">
-                                <a href="/api/projects/${state.selectedProject}/assets/download-all" class="btn btn-secondary btn-sm" title="Download all as ZIP">⬇️ Download All</a>
-                                <button class="btn btn-danger btn-sm" onclick="clearAllSourceDocuments()" title="Delete all source documents">🗑️ Clear All</button>
+                                <a href="${API_BASE}/api/projects/${state.selectedProject}/assets/download-all" class="btn btn-secondary btn-sm" title="Download all as ZIP">Download All</a>
+                                <button class="btn btn-danger btn-sm" onclick="clearAllSourceDocuments()" title="Delete all source documents">Clear All</button>
                             </div>
                         </div>
                         <div class="source-assets-grid">
@@ -657,10 +730,10 @@
                                     </div>
                                     <div class="source-asset-actions">
                                         ${a.gcsPath ? `
-                                            <button class="btn-icon" onclick="viewSourceDocument('${a.gcsPath}')" title="View">👁️</button>
-                                            <a href="/api/download/${a.gcsPath}" class="btn-icon" title="Download">⬇️</a>
+                                            <button class="btn-icon" onclick="viewSourceDocument('${a.gcsPath}')" title="View">view</button>
+                                            <a href="${API_BASE}/api/download/${a.gcsPath}" class="btn-icon" title="Download">dl</a>
                                         ` : ''}
-                                        <button class="btn-icon" onclick="deleteItem('assets', '${a.id}')" title="Delete">🗑️</button>
+                                        <button class="btn-icon" onclick="deleteItem('assets', '${a.id}')" title="Delete">del</button>
                                     </div>
                                 </div>
                             `).join('')}
@@ -681,8 +754,8 @@
                                 ${a.notes ? `<p class="text-sm mt-2">${a.notes}</p>` : ''}
                             </div>
                             <div class="item-actions">
-                                <button class="btn-icon" onclick="showEditModal('asset', '${a.id}')">✏️</button>
-                                <button class="btn-icon" onclick="deleteItem('assets', '${a.id}')">🗑️</button>
+                                <button class="btn-icon" onclick="showEditModal('asset', '${a.id}')">edit</button>
+                                <button class="btn-icon" onclick="deleteItem('assets', '${a.id}')">del</button>
                             </div>
                         </div>
                     </div>
@@ -695,7 +768,7 @@
                 <div class="section-header">
                     <h2>Scripts</h2>
                     <div class="flex gap-2">
-                        <button class="ai-button" onclick="showAIModal('script')">✨ AI Outline</button>
+                        <button class="ai-button" onclick="showAIModal('script')">AI Outline</button>
                         <button class="btn btn-primary" onclick="showAddModal('script')">+ Add</button>
                     </div>
                 </div>
@@ -710,8 +783,8 @@
                                     <div class="script-content">${s.content}</div>
                                 </div>
                                 <div class="item-actions">
-                                    <button class="btn-icon" onclick="showEditModal('script', '${s.id}')">✏️</button>
-                                    <button class="btn-icon" onclick="deleteItem('scripts', '${s.id}')">🗑️</button>
+                                    <button class="btn-icon" onclick="showEditModal('script', '${s.id}')">edit</button>
+                                    <button class="btn-icon" onclick="deleteItem('scripts', '${s.id}')">del</button>
                                 </div>
                             </div>
                         </div>
@@ -936,78 +1009,78 @@
             const templates = {
                 research: `
                     <div class="ai-section">
-                        <h4>🔍 Research Assistant</h4>
+                        <h4>Research Assistant</h4>
                         <p class="text-sm text-muted mb-3">Get help finding sources, contacts, and background information.</p>
                         <div class="input-with-mic">
                             <textarea id="ai-query" class="ai-input" rows="3" placeholder="What do you need research help with?"></textarea>
-                            <button type="button" class="mic-btn" data-for="ai-query" onclick="toggleSpeech('ai-query')" title="Speak">🎤</button>
+                            <button type="button" class="mic-btn" data-for="ai-query" onclick="toggleSpeech('ai-query')" title="Speak">mic</button>
                         </div>
-                        <button class="ai-button" onclick="runAI('research')" id="ai-btn">✨ Get Research Help</button>
+                        <button class="ai-button" onclick="runAI('research')" id="ai-btn">Get Research Help</button>
                         <div id="ai-result"></div>
                     </div>
                 `,
                 interview: `
                     <div class="ai-section">
-                        <h4>💬 Interview Question Generator</h4>
+                        <h4>Interview Question Generator</h4>
                         <p class="text-sm text-muted mb-3">Generate thoughtful interview questions.</p>
                         <div class="input-with-mic">
                             <input id="ai-subject" class="ai-input" placeholder="Subject name">
-                            <button type="button" class="mic-btn" data-for="ai-subject" onclick="toggleSpeech('ai-subject')" title="Speak">🎤</button>
+                            <button type="button" class="mic-btn" data-for="ai-subject" onclick="toggleSpeech('ai-subject')" title="Speak">mic</button>
                         </div>
                         <div class="input-with-mic">
                             <input id="ai-role" class="ai-input" placeholder="Their role">
-                            <button type="button" class="mic-btn" data-for="ai-role" onclick="toggleSpeech('ai-role')" title="Speak">🎤</button>
+                            <button type="button" class="mic-btn" data-for="ai-role" onclick="toggleSpeech('ai-role')" title="Speak">mic</button>
                         </div>
                         <div class="input-with-mic">
                             <textarea id="ai-context" class="ai-input" rows="2" placeholder="What aspects to explore?"></textarea>
-                            <button type="button" class="mic-btn" data-for="ai-context" onclick="toggleSpeech('ai-context')" title="Speak">🎤</button>
+                            <button type="button" class="mic-btn" data-for="ai-context" onclick="toggleSpeech('ai-context')" title="Speak">mic</button>
                         </div>
-                        <button class="ai-button" onclick="runAI('interview')" id="ai-btn">✨ Generate Questions</button>
+                        <button class="ai-button" onclick="runAI('interview')" id="ai-btn">Generate Questions</button>
                         <div id="ai-result"></div>
                     </div>
                 `,
                 script: `
                     <div class="ai-section">
-                        <h4>📝 Script Outline Generator</h4>
+                        <h4>Script Outline Generator</h4>
                         <p class="text-sm text-muted mb-3">Create a structured outline for your episode.</p>
                         <div class="input-with-mic">
                             <input id="ai-title" class="ai-input" placeholder="Episode title" value="${context.title || ''}">
-                            <button type="button" class="mic-btn" data-for="ai-title" onclick="toggleSpeech('ai-title')" title="Speak">🎤</button>
+                            <button type="button" class="mic-btn" data-for="ai-title" onclick="toggleSpeech('ai-title')" title="Speak">mic</button>
                         </div>
                         <div class="input-with-mic">
                             <textarea id="ai-topic" class="ai-input" rows="3" placeholder="What should this episode cover?"></textarea>
-                            <button type="button" class="mic-btn" data-for="ai-topic" onclick="toggleSpeech('ai-topic')" title="Speak">🎤</button>
+                            <button type="button" class="mic-btn" data-for="ai-topic" onclick="toggleSpeech('ai-topic')" title="Speak">mic</button>
                         </div>
                         <input id="ai-duration" class="ai-input" placeholder="Target duration (e.g., 45 minutes)">
-                        <button class="ai-button" onclick="runAI('script')" id="ai-btn">✨ Generate Outline</button>
+                        <button class="ai-button" onclick="runAI('script')" id="ai-btn">Generate Outline</button>
                         <div id="ai-result"></div>
                     </div>
                 `,
                 'shot-ideas': `
                     <div class="ai-section">
-                        <h4>🎬 Shot List Ideas</h4>
+                        <h4>Shot List Ideas</h4>
                         <p class="text-sm text-muted mb-3">Get creative shot ideas for your documentary.</p>
                         <div class="input-with-mic">
                             <textarea id="ai-scene" class="ai-input" rows="3" placeholder="Describe the scene or topic"></textarea>
-                            <button type="button" class="mic-btn" data-for="ai-scene" onclick="toggleSpeech('ai-scene')" title="Speak">🎤</button>
+                            <button type="button" class="mic-btn" data-for="ai-scene" onclick="toggleSpeech('ai-scene')" title="Speak">mic</button>
                         </div>
-                        <button class="ai-button" onclick="runAI('shot-ideas')" id="ai-btn">✨ Get Shot Ideas</button>
+                        <button class="ai-button" onclick="runAI('shot-ideas')" id="ai-btn">Get Shot Ideas</button>
                         <div id="ai-result"></div>
                     </div>
                 `,
                 'expand-topic': `
                     <div class="ai-section">
-                        <h4>💡 Topic Expansion</h4>
+                        <h4>Topic Expansion</h4>
                         <p class="text-sm text-muted mb-3">Explore angles, themes, and storylines.</p>
                         <div class="input-with-mic">
                             <textarea id="ai-topic" class="ai-input" rows="3" placeholder="What topic to explore?">${context.topic || ''}</textarea>
-                            <button type="button" class="mic-btn" data-for="ai-topic" onclick="toggleSpeech('ai-topic')" title="Speak">🎤</button>
+                            <button type="button" class="mic-btn" data-for="ai-topic" onclick="toggleSpeech('ai-topic')" title="Speak">mic</button>
                         </div>
                         <label class="checkbox-label">
                             <input type="checkbox" id="ai-use-project-context" ${context.topic ? 'checked' : ''}>
                             <span>Include project context (${state.project?.title || 'current project'})</span>
                         </label>
-                        <button class="ai-button" onclick="runAI('expand-topic')" id="ai-btn">✨ Expand Topic</button>
+                        <button class="ai-button" onclick="runAI('expand-topic')" id="ai-btn">Expand Topic</button>
                         <div id="ai-result"></div>
                     </div>
                 `
@@ -1086,7 +1159,7 @@
                 if (type === 'research' && response.sources && response.sources.length > 0) {
                     sourcesHtml = `
                         <div class="source-docs-section">
-                            <h4>📄 Archived Source Documents (${response.sources.length})</h4>
+                            <h4>Archived Source Documents (${response.sources.length})</h4>
                             <div class="source-docs-list">
                                 ${response.sources.map(src => `
                                     <div class="source-doc-item">
@@ -1096,8 +1169,8 @@
                                         </div>
                                         <div class="source-doc-actions">
                                             ${src.gcsPath ? `
-                                                <button class="btn-icon" onclick="viewSourceDocument('${src.gcsPath}')" title="View">👁️</button>
-                                                <a href="/api/download/${src.gcsPath}" class="btn-icon" title="Download">⬇️</a>
+                                                <button class="btn-icon" onclick="viewSourceDocument('${src.gcsPath}')" title="View">view</button>
+                                                <a href="${API_BASE}/api/download/${src.gcsPath}" class="btn-icon" title="Download">dl</a>
                                             ` : `<span class="badge badge-gray">${src.status}</span>`}
                                         </div>
                                     </div>
@@ -1114,16 +1187,16 @@
                         <div class="ai-result-raw" style="display:none;">${response.result}</div>
                         ${sourcesHtml}
                         ${type === 'research' ? `
-                            <button class="btn btn-primary mt-3" onclick="saveAIAsResearch()">💾 Save as Research Note</button>
+                            <button class="btn btn-primary mt-3" onclick="saveAIAsResearch()">Save as Research Note</button>
                         ` : ''}
                         ${type === 'interview' ? `
-                            <button class="btn btn-primary mt-3" onclick="saveAIAsInterview()">💾 Save as Interview</button>
+                            <button class="btn btn-primary mt-3" onclick="saveAIAsInterview()">Save as Interview</button>
                         ` : ''}
                         ${type === 'script' ? `
-                            <button class="btn btn-primary mt-3" onclick="saveAIAsScript()">💾 Save as Script</button>
+                            <button class="btn btn-primary mt-3" onclick="saveAIAsScript()">Save as Script</button>
                         ` : ''}
                         ${type === 'expand-topic' ? `
-                            <button class="btn btn-primary mt-3" onclick="saveAIAsResearchFromTopic()">💾 Save as Research Note</button>
+                            <button class="btn btn-primary mt-3" onclick="saveAIAsResearchFromTopic()">Save as Research Note</button>
                         ` : ''}
                     </div>
                 `;
@@ -1132,7 +1205,7 @@
             }
 
             btn.disabled = false;
-            btn.innerHTML = '✨ Try Again';
+            btn.innerHTML = 'Try Again';
         }
 
         async function saveAIAsResearch() {
@@ -1246,7 +1319,7 @@
 
         function toggleSpeech(inputId) {
             if (!recognition && !initSpeechRecognition()) {
-                alert('Speech recognition is not supported in your browser. Try Chrome or Edge.');
+                alert('Speech recognition is not supported in your browser.');
                 return;
             }
 
@@ -1271,10 +1344,10 @@
             document.querySelectorAll('.mic-btn').forEach(btn => {
                 if (isListening && btn.dataset.for === document.querySelector('[data-speech-target]')?.id) {
                     btn.classList.add('listening');
-                    btn.innerHTML = '🔴';
+                    btn.innerHTML = 'REC';
                 } else {
                     btn.classList.remove('listening');
-                    btn.innerHTML = '🎤';
+                    btn.innerHTML = 'mic';
                 }
             });
         }
@@ -1301,7 +1374,7 @@
         }
 
         function viewSourceDocument(path) {
-            window.open(`/api/document/${path}`, '_blank');
+            window.open(`${API_BASE}/api/document/${path}`, '_blank');
         }
 
         async function clearAllSourceDocuments() {
@@ -1338,7 +1411,7 @@
         function updateThemeButton(theme) {
             const btn = document.getElementById('theme-btn');
             if (btn) {
-                btn.textContent = theme === 'light' ? '🌙' : '☀️';
+                btn.textContent = theme === 'light' ? 'dark' : 'light';
                 btn.title = theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode';
             }
         }
@@ -1347,9 +1420,15 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             initTheme();
+            updateOnlineStatus();
             renderNav();
             loadProjectData();
         });
+
+        // Capacitor initialization
+        if (window.Capacitor) {
+            window.Capacitor.Plugins.SplashScreen?.hide();
+        }
     </script>
 </body>
 </html>

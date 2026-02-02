@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Android build outputs
+android/app/build/
+android/.gradle/
+android/build/
+android/local.properties
+
+# Keystore files (keep secure, don't commit)
+*.keystore
+*.jks
+
+# IDE
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Capacitor
+.capacitor/
+
+# Generated icons (regenerate with capacitor-assets)
+android/app/src/main/res/mipmap-*/
+android/app/src/main/res/drawable*/splash.png

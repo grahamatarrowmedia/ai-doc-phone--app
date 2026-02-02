@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Documentary Production</string>
+    <string name="title_activity_main">Documentary Production</string>
+    <string name="package_name">com.arrowmedia.docproduction</string>
+    <string name="custom_url_scheme">com.arrowmedia.docproduction</string>
+</resources>

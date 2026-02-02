@@ -132,11 +132,27 @@ ai-doc-phone--app/
 
 ## Mobile Usage
 
+### PWA (Progressive Web App)
+
 The app is designed as a Progressive Web App (PWA) for mobile use:
 
 1. Open the app URL in your mobile browser
 2. Tap "Add to Home Screen" (iOS Safari) or install prompt (Android Chrome)
 3. The app will run in standalone mode like a native app
+
+### Android App (Capacitor)
+
+A native Android wrapper is available in the `mobile/` directory:
+
+```bash
+cd mobile
+npm install
+npx cap add android
+npx cap sync android
+npx cap open android
+```
+
+See `mobile/README.md` for detailed build and deployment instructions.
 
 ## License
 

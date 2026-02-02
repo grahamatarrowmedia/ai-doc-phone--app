@@ -748,6 +748,61 @@ Suggest themes, storylines, key questions to answer, and unique perspectives."""
     return jsonify({"result": result})
 
 
+@app.route("/api/ai/generate-topics", methods=["POST"])
+def ai_generate_topics():
+    """Generate episode topics from project title and description."""
+    data = request.get_json()
+    title = data.get('title', '')
+    description = data.get('description', '')
+    num_topics = data.get('numTopics', 5)
+
+    system_prompt = """You are a documentary series planner. Generate compelling episode topics that would make a cohesive documentary series.
+
+IMPORTANT: Respond ONLY with a JSON array of episode objects. No markdown, no explanation, just valid JSON.
+
+Each episode object must have:
+- "title": A compelling episode title (max 60 chars)
+- "description": Brief description of what this episode covers (max 150 chars)
+- "order": Episode number (1, 2, 3, etc.)
+
+Example response format:
+[
+  {"title": "Episode Title Here", "description": "What this episode covers", "order": 1},
+  {"title": "Another Episode", "description": "Description of content", "order": 2}
+]"""
+
+    prompt = f"""Create {num_topics} episode topics for a documentary series:
+
+Title: {title}
+Description: {description}
+
+Generate episode topics that:
+1. Cover the subject comprehensively
+2. Have a logical narrative flow
+3. Each could stand alone but contribute to the whole
+4. Are engaging and specific, not generic
+
+Return ONLY the JSON array, no other text."""
+
+    result = generate_ai_response(prompt, system_prompt)
+
+    # Parse the JSON response
+    try:
+        # Clean up the response - remove markdown code blocks if present
+        cleaned = result.strip()
+        if cleaned.startswith('```'):
+            # Remove markdown code fence
+            lines = cleaned.split('\n')
+            cleaned = '\n'.join(lines[1:-1] if lines[-1].startswith('```') else lines[1:])
+
+        import json
+        topics = json.loads(cleaned)
+        return jsonify({"topics": topics})
+    except Exception as e:
+        # If parsing fails, return the raw result for debugging
+        return jsonify({"topics": [], "raw": result, "error": str(e)})
+
+
 # ============== Document Serving Routes ==============
 
 @app.route("/api/document/<path:blob_path>")

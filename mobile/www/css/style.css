@@ -1149,3 +1149,72 @@ textarea {
         font-size: 0.75rem;
     }
 }
+
+/* ============== Mobile App Specific Styles ============== */
+
+/* Safe area insets for notched devices */
+.header {
+    padding-top: max(1rem, env(safe-area-inset-top));
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+}
+
+.nav {
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+    padding-left: max(0.25rem, env(safe-area-inset-left));
+    padding-right: max(0.25rem, env(safe-area-inset-right));
+}
+
+.content {
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+}
+
+/* Nav icon styling for text-based icons */
+.nav-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    background: var(--gray-200);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.nav-item.active .nav-icon {
+    background: var(--primary);
+    color: white;
+}
+
+/* Prevent text selection on buttons for mobile */
+button, .btn, .nav-item, .header-btn {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* Better touch targets */
+.btn-icon {
+    min-width: 44px;
+    min-height: 44px;
+}
+
+/* Smooth scrolling */
+html {
+    scroll-behavior: smooth;
+}
+
+/* Prevent overscroll bounce on iOS */
+body {
+    overscroll-behavior: none;
+}
+
+/* Status bar area handling */
+@supports (padding-top: env(safe-area-inset-top)) {
+    body {
+        padding-top: env(safe-area-inset-top);
+    }
+}
