@@ -204,39 +204,47 @@
                 // Get projects
                 let projects = await api('/api/projects');
 
-                // If no projects, initialize sample data
-                if (!projects || projects.length === 0) {
-                    const result = await api('/api/init-sample-data', 'POST');
-                    projects = await api('/api/projects');
-                }
-
                 state.allProjects = projects || [];
 
-                if (projects.length > 0) {
-                    // Use previously selected project or default to first
-                    if (!state.selectedProject || !projects.find(p => p.id === state.selectedProject)) {
-                        state.selectedProject = projects[0].id;
-                    }
-                    state.project = projects.find(p => p.id === state.selectedProject);
-                    document.getElementById('project-name').textContent = state.project.title + ' [tap to switch]';
-
-                    // Load all related data
-                    const [episodes, research, interviews, shots, assets, scripts] = await Promise.all([
-                        api(`/api/projects/${state.selectedProject}/episodes`),
-                        api(`/api/projects/${state.selectedProject}/research`),
-                        api(`/api/projects/${state.selectedProject}/interviews`),
-                        api(`/api/projects/${state.selectedProject}/shots`),
-                        api(`/api/projects/${state.selectedProject}/assets`),
-                        api(`/api/projects/${state.selectedProject}/scripts`)
-                    ]);
-
-                    state.episodes = episodes || [];
-                    state.research = research || [];
-                    state.interviews = interviews || [];
-                    state.shots = shots || [];
-                    state.assets = assets || [];
-                    state.scripts = scripts || [];
+                // If no projects, show empty state
+                if (!projects || projects.length === 0) {
+                    state.selectedProject = null;
+                    state.project = null;
+                    state.episodes = [];
+                    state.research = [];
+                    state.interviews = [];
+                    state.shots = [];
+                    state.assets = [];
+                    state.scripts = [];
+                    document.getElementById('project-name').textContent = 'No projects';
+                    renderEmptyState();
+                    renderNav();
+                    return;
                 }
+
+                // Use previously selected project or default to first
+                if (!state.selectedProject || !projects.find(p => p.id === state.selectedProject)) {
+                    state.selectedProject = projects[0].id;
+                }
+                state.project = projects.find(p => p.id === state.selectedProject);
+                document.getElementById('project-name').textContent = state.project.title + ' [tap to switch]';
+
+                // Load all related data
+                const [episodes, research, interviews, shots, assets, scripts] = await Promise.all([
+                    api(`/api/projects/${state.selectedProject}/episodes`),
+                    api(`/api/projects/${state.selectedProject}/research`),
+                    api(`/api/projects/${state.selectedProject}/interviews`),
+                    api(`/api/projects/${state.selectedProject}/shots`),
+                    api(`/api/projects/${state.selectedProject}/assets`),
+                    api(`/api/projects/${state.selectedProject}/scripts`)
+                ]);
+
+                state.episodes = episodes || [];
+                state.research = research || [];
+                state.interviews = interviews || [];
+                state.shots = shots || [];
+                state.assets = assets || [];
+                state.scripts = scripts || [];
 
                 render();
             } catch (error) {
@@ -249,6 +257,53 @@
                     </div>
                 `;
             }
+        }
+
+        function renderEmptyState() {
+            const content = document.getElementById('content');
+            content.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">filmreel</div>
+                    <h2>Welcome to Documentary Production</h2>
+                    <p>Get started by creating your first documentary project.</p>
+                    <button class="btn btn-primary btn-lg" onclick="showNewProjectModal()">
+                        + Create New Project
+                    </button>
+                </div>
+            `;
+        }
+
+        function showNewProjectModal() {
+            const modal = document.getElementById('projects-modal');
+            const content = document.getElementById('projects-modal-content');
+
+            content.innerHTML = `
+                <div id="new-project-form">
+                    <p class="text-muted mb-3">Create your first documentary project to get started.</p>
+                    <form onsubmit="createNewProject(event)">
+                        <div class="input-with-mic">
+                            <input type="text" id="new-project-title" placeholder="Project title" required>
+                            <button type="button" class="mic-btn" data-for="new-project-title" onclick="toggleSpeech('new-project-title')" title="Speak">mic</button>
+                        </div>
+                        <div class="input-with-mic">
+                            <textarea id="new-project-description" placeholder="Brief description of your documentary" rows="3"></textarea>
+                            <button type="button" class="mic-btn" data-for="new-project-description" onclick="toggleSpeech('new-project-description')" title="Speak">mic</button>
+                        </div>
+                        <select id="new-project-status">
+                            <option value="Planning">Planning</option>
+                            <option value="Research">Research</option>
+                            <option value="In Production">In Production</option>
+                            <option value="Post-Production">Post-Production</option>
+                        </select>
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-secondary" onclick="closeProjectsModal()">Cancel</button>
+                            <button type="submit" class="btn btn-primary">Create Project</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+
+            modal.classList.add('active');
         }
 
         // ============== Project Management ==============
@@ -489,8 +544,11 @@
 
         function renderNav() {
             const nav = document.getElementById('nav');
+            const hasProject = state.project !== null;
             nav.innerHTML = navItems.map(item => `
-                <button class="nav-item ${state.activeTab === item.id ? 'active' : ''}" onclick="setTab('${item.id}')">
+                <button class="nav-item ${state.activeTab === item.id ? 'active' : ''} ${!hasProject ? 'disabled' : ''}"
+                        onclick="${hasProject ? `setTab('${item.id}')` : ''}"
+                        ${!hasProject ? 'disabled' : ''}>
                     <span class="nav-icon">${item.icon}</span>
                     <span>${item.label}</span>
                 </button>
