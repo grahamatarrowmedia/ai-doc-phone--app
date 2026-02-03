@@ -783,16 +783,23 @@ def ai_episode_research():
 
 3. **FOR EVERY FACT YOU INCLUDE**:
    - Mark verification status: ✅ VERIFIED (2+ credible sources) or ❌ EXCLUDED (single source only)
-   - List the corroborating sources with URLs
+   - List the corroborating sources with REAL, WORKING URLs
    - Note archive availability (footage, documents, photos)
 
-4. **MANDATORY EXCLUSIONS** - Do NOT include:
+4. **URL REQUIREMENTS**:
+   - ONLY include real, verifiable URLs that actually exist
+   - NEVER use placeholder text like "undefined", "[URL]", or fake URLs
+   - If you don't know the exact URL, describe where to find it instead
+   - Format links as: [Source Name](https://actual-url.com)
+   - Test that URLs are from real domains (.gov, .edu, .org, major news sites)
+
+5. **MANDATORY EXCLUSIONS** - Do NOT include:
    - Any fact from only one source (no matter how credible)
    - Rumors, speculation, or unconfirmed claims
    - Information that cannot be independently verified
    - Sources behind paywalls without noting this limitation
 
-5. **RESEARCH STRUCTURE**:
+6. **RESEARCH STRUCTURE**:
    ## Verified Facts & Background
    (Only multi-source verified information with source citations)
 
