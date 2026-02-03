@@ -955,7 +955,7 @@ The JSON must have:
 - "description": A comprehensive description of what this documentary should cover (max 500 chars)
 - "style": The documentary style/approach that fits best (e.g., "investigative journalism", "observational", "personal narrative", "educational", "cinematic")
 - "episodes": An array of episode objects, each with "title", "description", and "order"
-- "blueprintDocument": A detailed markdown document (1000-2000 words) that serves as the project blueprint, including:
+- "blueprintDocument": A detailed markdown document (1500-2500 words) that serves as the project blueprint, including:
   * Executive Summary
   * Project Overview and Goals
   * Target Audience
@@ -963,6 +963,15 @@ The JSON must have:
   * Key Themes to Explore
   * Production Approach
   * Episode Breakdown with descriptions
+  * Editing Approach (detailed section covering):
+    - Pacing and rhythm guidelines
+    - Transition styles between scenes/segments
+    - Use of B-roll and cutaways
+    - Music and sound design direction
+    - Graphics and text overlay style
+    - Color grading/look recommendations
+    - Interview editing approach (jump cuts vs continuous, etc.)
+    - Narrative structure and story arc editing
   * Potential Challenges and Considerations
 
 Example response format:
