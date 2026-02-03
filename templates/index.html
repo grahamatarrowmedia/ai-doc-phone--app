@@ -1093,6 +1093,12 @@
 
         // Convert plain URLs in text to clickable anchor tags
         function makeLinksClickable(text) {
+            // Ensure we have a string
+            if (typeof text !== 'string') {
+                console.error('makeLinksClickable received non-string:', text);
+                text = String(text || '');
+            }
+
             // First, escape HTML to prevent XSS
             let escaped = text
                 .replace(/&/g, '&amp;')
@@ -1103,10 +1109,10 @@
             // Match URLs that start with http:// or https://
             const urlPattern = /(https?:\/\/[^\s<>\[\]()\"\']+)/g;
 
-            escaped = escaped.replace(urlPattern, (url) => {
+            escaped = escaped.replace(urlPattern, function(url) {
                 // Clean up trailing punctuation that's not part of URL
-                let cleanUrl = url.replace(/[.,;:!?\)]+$/, '');
-                return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer">${cleanUrl}</a>`;
+                var cleanUrl = url.replace(/[.,;:!?\)]+$/, '');
+                return '<a href="' + cleanUrl + '" target="_blank" rel="noopener noreferrer">' + cleanUrl + '</a>';
             });
 
             // Convert newlines to <br> for proper display
@@ -1137,9 +1143,18 @@
                     description: description
                 });
 
-                if (response.result) {
+                console.log('API response:', response);
+
+                // Get the result text - handle both string and object responses
+                let resultText = response.result;
+                if (typeof resultText === 'object' && resultText !== null) {
+                    // If result is an object, try to get the text property
+                    resultText = resultText.text || resultText.content || JSON.stringify(resultText);
+                }
+
+                if (resultText) {
                     // Convert the plain text response to HTML with clickable links
-                    const htmlContent = makeLinksClickable(response.result);
+                    const htmlContent = makeLinksClickable(resultText);
 
                     content.innerHTML = `
                         <div class="ai-section">
@@ -1154,11 +1169,12 @@
                         </div>
                     `;
                     // Store result for copying
-                    window.lastResearchResult = response.result;
+                    window.lastResearchResult = resultText;
                 } else {
                     throw new Error('No result returned');
                 }
             } catch (error) {
+                console.error('Research error:', error);
                 content.innerHTML = `
                     <div class="ai-section">
                         <h4>❌ Research Error</h4>
