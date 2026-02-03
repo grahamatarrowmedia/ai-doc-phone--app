@@ -28,12 +28,18 @@
 </head>
 <body>
     <div id="app">
+        {% if app_env == 'dev' or app_env == 'development' %}
+        <div class="dev-banner">
+            ⚠️ DEVELOPMENT VERSION - v{{ app_version }}
+        </div>
+        {% endif %}
         <div class="container">
             <!-- Header -->
             <header class="header">
                 <div class="header-top">
                     <h1>📽️ Documentary Production</h1>
                     <div class="header-actions">
+                        <span class="version-badge" title="App version">v{{ app_version }}</span>
                         <button class="header-btn" onclick="toggleTheme()" id="theme-btn" title="Toggle dark/light mode">🌙</button>
                         <button class="header-btn" onclick="showProjectsModal()">📁 Projects</button>
                     </div>

@@ -28,6 +28,10 @@ STORAGE_BUCKET = os.environ.get("STORAGE_BUCKET", f"{PROJECT_ID}-doc-assets")
 MAX_URLS_PER_QUERY = 10
 DOWNLOAD_TIMEOUT = 30
 
+# App version and environment
+APP_VERSION = os.environ.get("APP_VERSION", "1.0.0")
+APP_ENV = os.environ.get("APP_ENV", "production")
+
 # Initialize Vertex AI
 vertexai.init(project=PROJECT_ID, location=LOCATION)
 model = GenerativeModel(MODEL_NAME)
@@ -387,7 +391,7 @@ def ensure_bucket_exists(bucket_name):
 @app.route("/")
 def index():
     """Render the main app interface."""
-    return render_template("index.html")
+    return render_template("index.html", app_version=APP_VERSION, app_env=APP_ENV)
 
 
 @app.route("/health")
