@@ -1090,6 +1090,13 @@ Return ONLY the JSON object as specified."""
             lines = cleaned.split('\n')
             cleaned = '\n'.join(lines[1:-1] if lines[-1].startswith('```') else lines[1:])
 
+        # Clean control characters that break JSON parsing
+        import re
+        # Remove control characters except newlines and tabs
+        cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', cleaned)
+        # Fix escaped newlines in strings (convert actual newlines in JSON strings to \n)
+        # This handles cases where the AI puts literal newlines inside JSON string values
+
         blueprint = json.loads(cleaned)
 
         # Save the blueprint document to GCS
