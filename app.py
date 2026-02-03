@@ -543,6 +543,34 @@ def clear_source_documents(project_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/projects/<project_id>/assets/download-sources", methods=["POST"])
+def download_additional_sources(project_id):
+    """Download source documents from a list of URLs."""
+    data = request.get_json()
+    urls = data.get('urls', [])
+    research_id = data.get('researchId', datetime.utcnow().strftime("%Y%m%d_%H%M%S"))
+
+    if not urls:
+        return jsonify({"error": "No URLs provided"}), 400
+
+    ensure_bucket_exists(STORAGE_BUCKET)
+    results = []
+    for url in urls[:5]:  # Max 5 per request
+        try:
+            result = download_and_store(url, STORAGE_BUCKET, project_id, research_id)
+            results.append({
+                "url": url,
+                "status": "completed" if result.get("status") == "success" else "error",
+                "title": result.get("title", ""),
+                "filename": result.get("filename", ""),
+                "error": result.get("error")
+            })
+        except Exception as e:
+            results.append({"url": url, "status": "error", "error": str(e)})
+
+    return jsonify({"results": results})
+
+
 @app.route("/api/projects/<project_id>/assets/download-all", methods=["GET"])
 def download_all_source_documents(project_id):
     """Download all source documents as a ZIP file."""
@@ -674,10 +702,11 @@ Remember: For documentary production, ACCURACY IS PARAMOUNT. It's better to prov
             research_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S") + "_" + hashlib.md5(query.encode()).hexdigest()[:8]
             response_data["researchId"] = research_id
 
-            # Download sources synchronously (daemon threads die when request ends in Cloud Run)
+            # Download sources synchronously (limited to 3 to prevent timeout)
+            MAX_SYNC_DOWNLOADS = 3
             ensure_bucket_exists(STORAGE_BUCKET)
             downloaded_sources = []
-            for url in urls[:MAX_URLS_PER_QUERY]:
+            for url in urls[:MAX_SYNC_DOWNLOADS]:
                 try:
                     result_download = download_and_store(url, STORAGE_BUCKET, project_id, research_id)
                     downloaded_sources.append({
@@ -688,6 +717,11 @@ Remember: For documentary production, ACCURACY IS PARAMOUNT. It's better to prov
                     })
                 except Exception as e:
                     downloaded_sources.append({"url": url, "status": "error", "error": str(e)})
+
+            # Mark remaining URLs as pending
+            for url in urls[MAX_SYNC_DOWNLOADS:]:
+                downloaded_sources.append({"url": url, "status": "pending"})
+
             response_data["sources"] = downloaded_sources
 
     return jsonify(response_data)
@@ -854,16 +888,17 @@ Generate thorough, VERIFIED, production-ready research with source URLs."""
     response_data = {"result": result, "saved": False, "sources": []}
 
     # Extract URLs and download source documents synchronously
-    # (Cloud Run kills daemon threads when request ends, so we do this synchronously)
+    # Limit to 3 downloads to avoid timeout (30 sec per download = 90 sec max)
     urls = extract_urls(result)
     if urls and project_id:
         research_id = f"ep_{episode_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
         response_data["researchId"] = research_id
 
-        # Download sources synchronously to ensure they're saved as assets
+        # Download sources synchronously (limited to prevent timeout)
+        MAX_SYNC_DOWNLOADS = 3
         ensure_bucket_exists(STORAGE_BUCKET)
         downloaded_sources = []
-        for url in urls[:MAX_URLS_PER_QUERY]:
+        for url in urls[:MAX_SYNC_DOWNLOADS]:
             try:
                 result_download = download_and_store(url, STORAGE_BUCKET, project_id, research_id)
                 downloaded_sources.append({
@@ -875,6 +910,11 @@ Generate thorough, VERIFIED, production-ready research with source URLs."""
                 })
             except Exception as e:
                 downloaded_sources.append({"url": url, "status": "error", "error": str(e)})
+
+        # Mark remaining URLs as pending (not downloaded yet)
+        for url in urls[MAX_SYNC_DOWNLOADS:]:
+            downloaded_sources.append({"url": url, "status": "pending"})
+
         response_data["sources"] = downloaded_sources
 
     # Auto-save as research linked to this episode
