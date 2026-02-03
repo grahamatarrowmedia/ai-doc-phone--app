@@ -1107,9 +1107,7 @@ Return ONLY the JSON array, no other text."""
 
 @app.route("/api/upload/signed-url", methods=["POST"])
 def get_signed_upload_url():
-    """Generate a signed URL for direct upload to GCS (supports large files)."""
-    from datetime import timedelta
-
+    """Generate a resumable upload URL for direct upload to GCS (supports large files)."""
     data = request.get_json()
     filename = data.get('filename', 'upload')
     content_type = data.get('contentType', 'application/octet-stream')
@@ -1125,19 +1123,18 @@ def get_signed_upload_url():
         bucket = storage_client.bucket(STORAGE_BUCKET)
         blob = bucket.blob(blob_name)
 
-        # Generate signed URL for upload (valid for 30 minutes)
-        signed_url = blob.generate_signed_url(
-            version="v4",
-            expiration=timedelta(minutes=30),
-            method="PUT",
-            content_type=content_type
+        # Create resumable upload session (works without private key signing)
+        resumable_url = blob.create_resumable_upload_session(
+            content_type=content_type,
+            size=file_size if file_size > 0 else None
         )
 
         return jsonify({
-            "uploadUrl": signed_url,
+            "uploadUrl": resumable_url,
             "gcsUri": f"gs://{STORAGE_BUCKET}/{blob_name}",
             "blobPath": blob_name,
-            "expiresIn": 1800  # 30 minutes
+            "expiresIn": 604800,  # 7 days for resumable uploads
+            "resumable": True
         })
 
     except Exception as e:
