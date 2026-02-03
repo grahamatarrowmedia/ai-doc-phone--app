@@ -1665,6 +1665,182 @@ textarea {
     color: var(--primary);
 }
 
+/* Feedback Button & Modal */
+.feedback-floating-btn {
+    position: fixed;
+    bottom: 90px;
+    right: 20px;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: white;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: 900;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.feedback-floating-btn:hover {
+    transform: scale(1.1);
+    background: var(--primary-dark);
+}
+
+.feedback-floating-btn:active {
+    transform: scale(0.95);
+}
+
+.feedback-modal-content {
+    max-width: 500px;
+}
+
+.feedback-screenshot-container {
+    margin-bottom: 1rem;
+}
+
+.feedback-screenshot {
+    background: var(--gray-100);
+    border: 1px solid var(--gray-200);
+    border-radius: 0.5rem;
+    overflow: hidden;
+    max-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.screenshot-img {
+    max-width: 100%;
+    max-height: 200px;
+    object-fit: contain;
+}
+
+.feedback-input-section {
+    margin-bottom: 1rem;
+}
+
+.feedback-input-section label {
+    display: block;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+}
+
+.feedback-textarea-container {
+    position: relative;
+    display: flex;
+    gap: 0.5rem;
+}
+
+.feedback-textarea-container textarea {
+    flex: 1;
+    padding: 0.75rem;
+    border: 1px solid var(--gray-300);
+    border-radius: 0.5rem;
+    font-size: 1rem;
+    resize: vertical;
+    min-height: 100px;
+    background: var(--white);
+    color: var(--gray-900);
+}
+
+.feedback-textarea-container textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.voice-input-btn {
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--gray-300);
+    border-radius: 0.5rem;
+    background: var(--white);
+    font-size: 1.25rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.voice-input-btn:hover {
+    background: var(--gray-100);
+}
+
+.voice-input-btn.recording {
+    background: #fee2e2;
+    border-color: #ef4444;
+    animation: pulse-recording 1s infinite;
+}
+
+@keyframes pulse-recording {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+}
+
+.voice-status {
+    font-size: 0.875rem;
+    color: var(--gray-600);
+    margin-top: 0.5rem;
+    min-height: 1.25rem;
+}
+
+.voice-status.active {
+    color: #ef4444;
+    font-weight: 500;
+}
+
+.feedback-type-section {
+    margin-bottom: 1.5rem;
+}
+
+.feedback-type-section label {
+    display: block;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+}
+
+.feedback-type-options {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.feedback-type-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--gray-100);
+    border: 1px solid var(--gray-200);
+    border-radius: 2rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.feedback-type-option:hover {
+    background: var(--gray-200);
+}
+
+.feedback-type-option input[type="radio"] {
+    display: none;
+}
+
+.feedback-type-option:has(input:checked) {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+.feedback-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+}
+
 /* Responsive */
 @media (min-width: 768px) {
     .container {

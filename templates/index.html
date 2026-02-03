@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="manifest" href="/static/manifest.json">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script>
         // Configure marked for better rendering
         marked.setOptions({
@@ -72,6 +73,63 @@
                 <button onclick="closeAIModal()" class="close-btn">&times;</button>
             </div>
             <div id="ai-modal-content"></div>
+        </div>
+    </div>
+
+    <!-- Feedback Button -->
+    <button id="feedback-btn" class="feedback-floating-btn" onclick="openFeedback()" title="Send Feedback">
+        💬
+    </button>
+
+    <!-- Feedback Modal -->
+    <div id="feedback-modal" class="modal">
+        <div class="modal-content feedback-modal-content">
+            <div class="modal-header">
+                <h3>📝 Send Feedback</h3>
+                <button onclick="closeFeedbackModal()" class="close-btn">&times;</button>
+            </div>
+            <div id="feedback-body">
+                <div class="feedback-screenshot-container">
+                    <p class="text-muted mb-2">Screenshot captured:</p>
+                    <div id="feedback-screenshot-preview" class="feedback-screenshot"></div>
+                </div>
+
+                <div class="feedback-input-section">
+                    <label for="feedback-text">Your feedback:</label>
+                    <div class="feedback-textarea-container">
+                        <textarea id="feedback-text" placeholder="Describe your feedback, suggestion, or issue..." rows="4"></textarea>
+                        <button id="voice-btn" class="voice-input-btn" onclick="toggleVoiceInput()" title="Voice input">
+                            🎤
+                        </button>
+                    </div>
+                    <div id="voice-status" class="voice-status"></div>
+                </div>
+
+                <div class="feedback-type-section">
+                    <label>Feedback type:</label>
+                    <div class="feedback-type-options">
+                        <label class="feedback-type-option">
+                            <input type="radio" name="feedback-type" value="bug" checked>
+                            <span>🐛 Bug</span>
+                        </label>
+                        <label class="feedback-type-option">
+                            <input type="radio" name="feedback-type" value="feature">
+                            <span>💡 Feature</span>
+                        </label>
+                        <label class="feedback-type-option">
+                            <input type="radio" name="feedback-type" value="general">
+                            <span>💬 General</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="feedback-actions">
+                    <button class="btn btn-secondary" onclick="closeFeedbackModal()">Cancel</button>
+                    <button class="btn btn-primary" onclick="submitFeedback()" id="submit-feedback-btn">
+                        Send Feedback
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1426,8 +1484,17 @@
 
                 ${episodesWithoutScripts.length > 0 ? `
                     <div class="card">
-                        <h3>Generate Scripts</h3>
-                        <p class="text-muted mb-3">Select an episode to generate a production-ready script:</p>
+                        <div class="flex justify-between items-center mb-3">
+                            <div>
+                                <h3>Generate Scripts</h3>
+                                <p class="text-muted">Select an episode or generate all at once:</p>
+                            </div>
+                            ${episodesWithoutScripts.length > 1 ? `
+                                <button class="ai-button" id="generate-all-btn" onclick="generateAllScripts()">
+                                    ✨ Generate All Scripts (${episodesWithoutScripts.length})
+                                </button>
+                            ` : ''}
+                        </div>
                         <div class="episode-list">
                             ${episodesWithoutScripts.map(ep => `
                                 <div class="episode-item" style="display: flex; justify-content: space-between; align-items: center;">
@@ -1445,8 +1512,16 @@
                 ` : ''}
 
                 ${state.scripts.length > 0 ? `
-                    <div class="section-header mt-4">
-                        <h3>Generated Scripts</h3>
+                    <div class="section-header mt-4" style="display: flex; justify-content: space-between; align-items: center;">
+                        <h3>Generated Scripts (${state.scripts.length})</h3>
+                        <div class="flex gap-2">
+                            <button class="btn btn-sm btn-secondary" onclick="downloadAllScripts()">
+                                📥 Download All
+                            </button>
+                            <button class="btn btn-sm btn-primary" onclick="exportForQuickture()">
+                                🎬 Export for Quickture
+                            </button>
+                        </div>
                     </div>
                     ${state.scripts.map(s => {
                         const episode = state.episodes.find(e => e.id === s.episodeId);
@@ -1561,6 +1636,453 @@
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
+        }
+
+        async function generateAllScripts() {
+            const episodesWithScripts = new Set(state.scripts.map(s => s.episodeId));
+            const episodesWithoutScripts = state.episodes.filter(e => !episodesWithScripts.has(e.id));
+
+            if (episodesWithoutScripts.length === 0) {
+                alert('All episodes already have scripts!');
+                return;
+            }
+
+            const btn = document.getElementById('generate-all-btn');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner-small"></span> Generating...';
+            }
+
+            let completed = 0;
+            let errors = 0;
+
+            // Show progress modal
+            showModal('Generating All Scripts', `
+                <div class="text-center">
+                    <div class="spinner mb-3"></div>
+                    <p id="gen-progress">Generating script 1 of ${episodesWithoutScripts.length}...</p>
+                    <div class="progress-bar mt-3">
+                        <div id="gen-progress-bar" class="progress-fill" style="width: 0%"></div>
+                    </div>
+                </div>
+            `);
+
+            for (const episode of episodesWithoutScripts) {
+                try {
+                    const progressEl = document.getElementById('gen-progress');
+                    const progressBar = document.getElementById('gen-progress-bar');
+                    if (progressEl) progressEl.textContent = `Generating: ${episode.title.substring(0, 40)}...`;
+
+                    const response = await fetch('/api/ai/generate-script', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            episodeId: episode.id,
+                            episodeTitle: episode.title,
+                            episodeDescription: episode.description || '',
+                            projectId: state.selectedProject,
+                            projectTitle: state.project.title,
+                            projectDescription: state.project.description || '',
+                            projectStyle: state.project.style || '',
+                            duration: episode.duration || '45 minutes'
+                        })
+                    });
+
+                    const data = await response.json();
+                    if (data.error) throw new Error(data.error);
+
+                    completed++;
+                    if (progressBar) progressBar.style.width = `${(completed / episodesWithoutScripts.length) * 100}%`;
+
+                } catch (error) {
+                    console.error(`Error generating script for ${episode.title}:`, error);
+                    errors++;
+                }
+            }
+
+            // Reload scripts
+            state.scripts = await api(`/api/projects/${state.selectedProject}/scripts`);
+            closeModal();
+            render();
+
+            // Show result
+            if (errors > 0) {
+                alert(`Generated ${completed} scripts. ${errors} failed.`);
+            } else {
+                alert(`Successfully generated ${completed} scripts!`);
+            }
+        }
+
+        function downloadAllScripts() {
+            if (state.scripts.length === 0) {
+                alert('No scripts to download');
+                return;
+            }
+
+            // Create combined document
+            const projectTitle = state.project.title || 'Documentary';
+            let combined = `# ${projectTitle} - Complete Scripts\n`;
+            combined += `Generated: ${new Date().toLocaleDateString()}\n`;
+            combined += `Total Episodes: ${state.scripts.length}\n\n`;
+            combined += '═'.repeat(80) + '\n\n';
+
+            state.scripts.forEach((script, index) => {
+                const episode = state.episodes.find(e => e.id === script.episodeId);
+                combined += `## Episode ${index + 1}: ${episode?.title || script.title}\n\n`;
+                combined += script.content || '';
+                combined += '\n\n' + '─'.repeat(80) + '\n\n';
+            });
+
+            // Download as single file
+            const blob = new Blob([combined], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${projectTitle.replace(/[^a-z0-9]/gi, '_')}_All_Scripts.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function exportForQuickture() {
+            if (state.scripts.length === 0) {
+                alert('No scripts to export');
+                return;
+            }
+
+            // Create Quickture-optimized export with metadata
+            const projectTitle = state.project.title || 'Documentary';
+
+            let exportData = {
+                project: {
+                    title: projectTitle,
+                    description: state.project.description || '',
+                    style: state.project.style || '',
+                    exportDate: new Date().toISOString()
+                },
+                episodes: []
+            };
+
+            // Create structured data for each episode
+            state.scripts.forEach((script, index) => {
+                const episode = state.episodes.find(e => e.id === script.episodeId);
+
+                // Parse scenes from script content
+                const scenes = parseScenes(script.content || '');
+
+                exportData.episodes.push({
+                    number: index + 1,
+                    title: episode?.title || script.title,
+                    description: episode?.description || '',
+                    duration: script.duration || '45 minutes',
+                    scenes: scenes,
+                    fullScript: script.content || ''
+                });
+            });
+
+            // Create markdown version optimized for Quickture workflow
+            let quicktureDoc = `# QUICKTURE PRODUCTION GUIDE\n`;
+            quicktureDoc += `## Project: ${projectTitle}\n\n`;
+            quicktureDoc += `**Style:** ${state.project.style || 'Documentary'}\n`;
+            quicktureDoc += `**Export Date:** ${new Date().toLocaleDateString()}\n\n`;
+            quicktureDoc += `---\n\n`;
+            quicktureDoc += `## QUICK REFERENCE: SHOT LIST\n\n`;
+
+            // Generate consolidated shot list
+            exportData.episodes.forEach((ep, i) => {
+                quicktureDoc += `### Episode ${i + 1}: ${ep.title}\n\n`;
+                ep.scenes.forEach(scene => {
+                    quicktureDoc += `**${scene.name}** (${scene.duration || 'TBD'})\n`;
+                    if (scene.broll && scene.broll.length > 0) {
+                        scene.broll.forEach(shot => quicktureDoc += `  - [ ] ${shot}\n`);
+                    }
+                    quicktureDoc += '\n';
+                });
+            });
+
+            quicktureDoc += `---\n\n## FULL SCRIPTS\n\n`;
+
+            state.scripts.forEach((script, index) => {
+                const episode = state.episodes.find(e => e.id === script.episodeId);
+                quicktureDoc += `### Episode ${index + 1}: ${episode?.title || script.title}\n\n`;
+                quicktureDoc += script.content || '';
+                quicktureDoc += '\n\n---\n\n';
+            });
+
+            // Download the Quickture guide
+            const blob = new Blob([quicktureDoc], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${projectTitle.replace(/[^a-z0-9]/gi, '_')}_Quickture_Guide.md`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            // Also offer JSON export
+            setTimeout(() => {
+                if (confirm('Also download structured JSON data for advanced workflows?')) {
+                    const jsonBlob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                    const jsonUrl = URL.createObjectURL(jsonBlob);
+                    const jsonA = document.createElement('a');
+                    jsonA.href = jsonUrl;
+                    jsonA.download = `${projectTitle.replace(/[^a-z0-9]/gi, '_')}_Quickture_Data.json`;
+                    document.body.appendChild(jsonA);
+                    jsonA.click();
+                    document.body.removeChild(jsonA);
+                    URL.revokeObjectURL(jsonUrl);
+                }
+            }, 500);
+        }
+
+        function parseScenes(scriptContent) {
+            // Parse scene structure from script markdown
+            const scenes = [];
+            const sceneRegex = /SCENE\s+(\d+)[:\s]+([^\n]+)/gi;
+            const brollRegex = /B-ROLL NEEDED:([^]*?)(?=\n(?:SCENE|GRAPHICS|INTERVIEW|NARRATION|$))/gi;
+
+            let match;
+            while ((match = sceneRegex.exec(scriptContent)) !== null) {
+                const sceneNum = match[1];
+                const sceneName = match[2].trim();
+
+                // Find B-roll for this scene
+                const sceneStart = match.index;
+                const nextScene = scriptContent.indexOf('SCENE', sceneStart + 10);
+                const sceneContent = scriptContent.substring(sceneStart, nextScene > 0 ? nextScene : undefined);
+
+                const broll = [];
+                const brollMatch = /B-ROLL NEEDED:\s*\n([\s\S]*?)(?=\n\s*\n|\n[A-Z]+:|$)/i.exec(sceneContent);
+                if (brollMatch) {
+                    const brollLines = brollMatch[1].split('\n');
+                    brollLines.forEach(line => {
+                        const cleaned = line.replace(/^[\s\-\*]+/, '').trim();
+                        if (cleaned && cleaned.length > 2) {
+                            broll.push(cleaned);
+                        }
+                    });
+                }
+
+                // Find duration
+                const durationMatch = /Duration:\s*([^\n]+)/i.exec(sceneContent);
+
+                scenes.push({
+                    number: parseInt(sceneNum),
+                    name: `Scene ${sceneNum}: ${sceneName}`,
+                    duration: durationMatch ? durationMatch[1].trim() : null,
+                    broll: broll
+                });
+            }
+
+            return scenes;
+        }
+
+        // ============== Feedback Functions ==============
+
+        let feedbackScreenshot = null;
+        let speechRecognition = null;
+        let isRecording = false;
+
+        async function openFeedback() {
+            // Hide the feedback button while modal is open
+            document.getElementById('feedback-btn').style.display = 'none';
+
+            // Show modal immediately with loading state
+            document.getElementById('feedback-modal').classList.add('active');
+            document.getElementById('feedback-screenshot-preview').innerHTML = `
+                <div class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Capturing screenshot...</p>
+                </div>
+            `;
+
+            // Clear previous input
+            document.getElementById('feedback-text').value = '';
+            document.querySelector('input[name="feedback-type"][value="bug"]').checked = true;
+
+            // Capture screenshot
+            try {
+                // Hide feedback button and modal temporarily for clean screenshot
+                document.getElementById('feedback-modal').style.visibility = 'hidden';
+
+                const canvas = await html2canvas(document.body, {
+                    scale: 0.5,  // Reduce size for faster upload
+                    useCORS: true,
+                    logging: false,
+                    backgroundColor: getComputedStyle(document.body).backgroundColor
+                });
+
+                feedbackScreenshot = canvas.toDataURL('image/jpeg', 0.7);
+
+                // Show screenshot preview
+                document.getElementById('feedback-screenshot-preview').innerHTML = `
+                    <img src="${feedbackScreenshot}" alt="Screenshot" class="screenshot-img">
+                `;
+
+                document.getElementById('feedback-modal').style.visibility = 'visible';
+
+            } catch (error) {
+                console.error('Screenshot error:', error);
+                document.getElementById('feedback-screenshot-preview').innerHTML = `
+                    <div class="text-muted">Screenshot capture failed - feedback will be sent without image</div>
+                `;
+                document.getElementById('feedback-modal').style.visibility = 'visible';
+            }
+        }
+
+        function closeFeedbackModal() {
+            document.getElementById('feedback-modal').classList.remove('active');
+            document.getElementById('feedback-btn').style.display = 'flex';
+            stopVoiceInput();
+            feedbackScreenshot = null;
+        }
+
+        function toggleVoiceInput() {
+            if (isRecording) {
+                stopVoiceInput();
+            } else {
+                startVoiceInput();
+            }
+        }
+
+        function startVoiceInput() {
+            // Check for browser support
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+            if (!SpeechRecognition) {
+                alert('Voice input is not supported in this browser. Try Chrome or Edge.');
+                return;
+            }
+
+            speechRecognition = new SpeechRecognition();
+            speechRecognition.continuous = true;
+            speechRecognition.interimResults = true;
+            speechRecognition.lang = 'en-US';
+
+            const voiceBtn = document.getElementById('voice-btn');
+            const voiceStatus = document.getElementById('voice-status');
+            const feedbackText = document.getElementById('feedback-text');
+
+            speechRecognition.onstart = () => {
+                isRecording = true;
+                voiceBtn.classList.add('recording');
+                voiceBtn.innerHTML = '⏹️';
+                voiceStatus.textContent = '🔴 Listening... (click to stop)';
+                voiceStatus.classList.add('active');
+            };
+
+            speechRecognition.onresult = (event) => {
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcript + ' ';
+                    } else {
+                        interimTranscript += transcript;
+                    }
+                }
+
+                if (finalTranscript) {
+                    feedbackText.value += finalTranscript;
+                }
+
+                if (interimTranscript) {
+                    voiceStatus.textContent = `🔴 "${interimTranscript}"`;
+                }
+            };
+
+            speechRecognition.onerror = (event) => {
+                console.error('Speech recognition error:', event.error);
+                if (event.error === 'not-allowed') {
+                    alert('Microphone access denied. Please allow microphone access to use voice input.');
+                }
+                stopVoiceInput();
+            };
+
+            speechRecognition.onend = () => {
+                // Restart if still recording (auto-stop after silence)
+                if (isRecording) {
+                    try {
+                        speechRecognition.start();
+                    } catch (e) {
+                        stopVoiceInput();
+                    }
+                }
+            };
+
+            try {
+                speechRecognition.start();
+            } catch (error) {
+                console.error('Failed to start speech recognition:', error);
+                alert('Failed to start voice input. Please try again.');
+            }
+        }
+
+        function stopVoiceInput() {
+            isRecording = false;
+            const voiceBtn = document.getElementById('voice-btn');
+            const voiceStatus = document.getElementById('voice-status');
+
+            voiceBtn.classList.remove('recording');
+            voiceBtn.innerHTML = '🎤';
+            voiceStatus.textContent = '';
+            voiceStatus.classList.remove('active');
+
+            if (speechRecognition) {
+                speechRecognition.stop();
+                speechRecognition = null;
+            }
+        }
+
+        async function submitFeedback() {
+            const feedbackText = document.getElementById('feedback-text').value.trim();
+            const feedbackType = document.querySelector('input[name="feedback-type"]:checked').value;
+
+            if (!feedbackText) {
+                alert('Please enter your feedback');
+                return;
+            }
+
+            const submitBtn = document.getElementById('submit-feedback-btn');
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="spinner-small"></span> Sending...';
+
+            try {
+                const response = await fetch('/api/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: feedbackText,
+                        type: feedbackType,
+                        screenshot: feedbackScreenshot,
+                        projectId: state.selectedProject,
+                        projectTitle: state.project?.title || null,
+                        currentTab: state.activeTab,
+                        userAgent: navigator.userAgent,
+                        screenSize: `${window.innerWidth}x${window.innerHeight}`,
+                        timestamp: new Date().toISOString()
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                closeFeedbackModal();
+                alert('Thank you for your feedback! 🙏');
+
+            } catch (error) {
+                console.error('Feedback submission error:', error);
+                alert('Failed to send feedback: ' + error.message);
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Send Feedback';
+            }
         }
 
         // ============== Modal Functions ==============

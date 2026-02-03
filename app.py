@@ -6,6 +6,8 @@ import os
 import re
 import hashlib
 import threading
+import base64
+import uuid
 from datetime import datetime
 from urllib.parse import urlparse
 
@@ -44,7 +46,8 @@ COLLECTIONS = {
     'interviews': 'doc_interviews',
     'shots': 'doc_shots',
     'assets': 'doc_assets',
-    'scripts': 'doc_scripts'
+    'scripts': 'doc_scripts',
+    'feedback': 'doc_feedback'
 }
 
 
@@ -746,6 +749,95 @@ def delete_script(script_id):
     """Delete a script."""
     delete_doc('scripts', script_id)
     return jsonify({"success": True})
+
+
+# ============== Feedback Routes ==============
+
+@app.route("/api/feedback", methods=["POST"])
+def submit_feedback():
+    """Submit user feedback with optional screenshot."""
+    data = request.get_json()
+
+    feedback_text = data.get('text', '')
+    feedback_type = data.get('type', 'general')
+    screenshot_data = data.get('screenshot')
+    project_id = data.get('projectId')
+    project_title = data.get('projectTitle')
+    current_tab = data.get('currentTab')
+    user_agent = data.get('userAgent', '')
+    screen_size = data.get('screenSize', '')
+    timestamp = data.get('timestamp', datetime.utcnow().isoformat())
+
+    if not feedback_text:
+        return jsonify({"error": "Feedback text is required"}), 400
+
+    # Save screenshot to GCS if provided
+    screenshot_path = None
+    if screenshot_data and screenshot_data.startswith('data:image'):
+        try:
+            # Extract base64 data
+            header, base64_data = screenshot_data.split(',', 1)
+            image_data = base64.b64decode(base64_data)
+
+            # Generate unique filename
+            feedback_id = str(uuid.uuid4())[:8]
+            screenshot_filename = f"feedback/{feedback_id}_screenshot.jpg"
+
+            # Upload to GCS
+            ensure_bucket_exists(STORAGE_BUCKET)
+            bucket = storage_client.bucket(STORAGE_BUCKET)
+            blob = bucket.blob(screenshot_filename)
+            blob.upload_from_string(image_data, content_type='image/jpeg')
+
+            screenshot_path = screenshot_filename
+            print(f"Feedback screenshot saved: {screenshot_filename}")
+
+        except Exception as e:
+            print(f"Error saving feedback screenshot: {e}")
+            # Continue without screenshot
+
+    # Create feedback document
+    feedback_doc = {
+        'text': feedback_text,
+        'type': feedback_type,
+        'screenshotPath': screenshot_path,
+        'projectId': project_id,
+        'projectTitle': project_title,
+        'currentTab': current_tab,
+        'userAgent': user_agent,
+        'screenSize': screen_size,
+        'status': 'new',
+        'createdAt': timestamp
+    }
+
+    # Save to Firestore
+    doc_ref = db.collection(COLLECTIONS['feedback']).document()
+    doc_ref.set(feedback_doc)
+    feedback_doc['id'] = doc_ref.id
+
+    print(f"Feedback submitted: [{feedback_type}] {feedback_text[:50]}...")
+
+    return jsonify({
+        "success": True,
+        "feedbackId": doc_ref.id,
+        "message": "Feedback received"
+    })
+
+
+@app.route("/api/feedback", methods=["GET"])
+def get_all_feedback():
+    """Get all feedback (admin view)."""
+    docs = db.collection(COLLECTIONS['feedback']).order_by(
+        'createdAt', direction=firestore.Query.DESCENDING
+    ).limit(100).stream()
+
+    feedback_list = []
+    for doc in docs:
+        fb = doc.to_dict()
+        fb['id'] = doc.id
+        feedback_list.append(fb)
+
+    return jsonify(feedback_list)
 
 
 @app.route("/api/projects/<project_id>/blueprint-content", methods=["GET"])
