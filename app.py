@@ -122,19 +122,47 @@ def generate_grounded_research(prompt, system_prompt=""):
         full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
         response = grounded_model.generate_content(full_prompt)
 
-        # Extract grounding metadata (sources used)
+        # Extract grounding metadata (sources used by Google Search)
         grounding_metadata = []
-        if hasattr(response, 'candidates') and response.candidates:
-            candidate = response.candidates[0]
-            if hasattr(candidate, 'grounding_metadata') and candidate.grounding_metadata:
-                gm = candidate.grounding_metadata
-                if hasattr(gm, 'grounding_chunks'):
-                    for chunk in gm.grounding_chunks:
-                        if hasattr(chunk, 'web') and chunk.web:
-                            grounding_metadata.append({
-                                'uri': chunk.web.uri if hasattr(chunk.web, 'uri') else '',
-                                'title': chunk.web.title if hasattr(chunk.web, 'title') else ''
-                            })
+        try:
+            if hasattr(response, 'candidates') and response.candidates:
+                candidate = response.candidates[0]
+                # Try multiple paths for grounding metadata
+                gm = getattr(candidate, 'grounding_metadata', None)
+                if gm:
+                    # Check for grounding_chunks (web sources)
+                    chunks = getattr(gm, 'grounding_chunks', None) or getattr(gm, 'web_search_queries', None)
+                    if chunks:
+                        for chunk in chunks:
+                            web = getattr(chunk, 'web', None)
+                            if web:
+                                uri = getattr(web, 'uri', '') or getattr(web, 'url', '')
+                                title = getattr(web, 'title', '')
+                                if uri:
+                                    grounding_metadata.append({'uri': uri, 'title': title})
+
+                    # Also check grounding_supports for citations
+                    supports = getattr(gm, 'grounding_supports', None)
+                    if supports:
+                        for support in supports:
+                            chunks = getattr(support, 'grounding_chunk_indices', [])
+                            # Get the segment info if available
+                            segment = getattr(support, 'segment', None)
+
+                    # Check search_entry_point for search suggestions
+                    search_entry = getattr(gm, 'search_entry_point', None)
+                    if search_entry:
+                        rendered = getattr(search_entry, 'rendered_content', '')
+                        # Extract URLs from rendered content if present
+                        import re
+                        urls_in_rendered = re.findall(r'href="([^"]+)"', rendered)
+                        for url in urls_in_rendered[:5]:
+                            if url.startswith('http') and url not in [g['uri'] for g in grounding_metadata]:
+                                grounding_metadata.append({'uri': url, 'title': ''})
+
+                print(f"Grounding metadata found: {len(grounding_metadata)} sources")
+        except Exception as gm_error:
+            print(f"Error extracting grounding metadata: {gm_error}")
 
         return {
             'text': response.text,
