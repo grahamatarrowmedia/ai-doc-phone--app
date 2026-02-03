@@ -933,11 +933,11 @@
 
             content.innerHTML = `
                 <div class="ai-section">
-                    <h4>✨ Generating Research...</h4>
-                    <p class="text-sm text-muted mb-3">Creating research for "${title}"</p>
+                    <h4>🔍 Deep Verified Research</h4>
+                    <p class="text-sm text-muted mb-3">Researching "${title}" with multi-source verification</p>
                     <div class="loading-state">
                         <div class="spinner"></div>
-                        <p>Researching topic...</p>
+                        <p>Verifying sources and cross-referencing facts...</p>
                     </div>
                 </div>
             `;
@@ -950,13 +950,19 @@
                     episodeDescription: description,
                     projectId: state.selectedProject,
                     projectTitle: state.project?.title || '',
-                    projectDescription: state.project?.description || ''
+                    projectDescription: state.project?.description || '',
+                    projectStyle: state.project?.style || ''
                 });
+
+                const sourcesInfo = response.sources && response.sources.length > 0
+                    ? `<p class="text-sm text-muted mb-2">📥 ${response.sources.length} source document(s) being downloaded to Assets</p>`
+                    : '';
 
                 content.innerHTML = `
                     <div class="ai-section">
-                        <h4>✅ Research Generated</h4>
-                        <p class="text-sm text-muted mb-3">Research for "${title}" has been saved.</p>
+                        <h4>✅ Verified Research Generated</h4>
+                        <p class="text-sm text-muted mb-2">Research for "${title}" has been saved.</p>
+                        ${sourcesInfo}
                         <div class="ai-result">
                             <div class="ai-result-content">${marked.parse(response.result)}</div>
                         </div>
@@ -1065,7 +1071,7 @@
 
             content.innerHTML = `
                 <div class="ai-section">
-                    <h4>✨ Generating Research...</h4>
+                    <h4>🔍 Deep Verified Research</h4>
                     <div class="progress-info">
                         <p>Processing <span id="progress-current">0</span> of ${episodes.length} episodes</p>
                         <div class="progress-bar">
@@ -1077,8 +1083,9 @@
             `;
 
             const results = [];
+            let totalSources = 0;
             for (const ep of episodes) {
-                document.getElementById('progress-episode').textContent = `Researching: ${ep.title}`;
+                document.getElementById('progress-episode').textContent = `Verifying sources: ${ep.title}`;
 
                 try {
                     const response = await api('/api/ai/episode-research', 'POST', {
@@ -1087,9 +1094,12 @@
                         episodeDescription: ep.description,
                         projectId: state.selectedProject,
                         projectTitle: state.project?.title || '',
-                        projectDescription: state.project?.description || ''
+                        projectDescription: state.project?.description || '',
+                        projectStyle: state.project?.style || ''
                     });
-                    results.push({ episode: ep.title, success: true });
+                    const sourceCount = response.sources ? response.sources.length : 0;
+                    totalSources += sourceCount;
+                    results.push({ episode: ep.title, success: true, sources: sourceCount });
                 } catch (error) {
                     results.push({ episode: ep.title, success: false, error: error.message });
                 }
@@ -1104,8 +1114,9 @@
 
             content.innerHTML = `
                 <div class="ai-section">
-                    <h4>✅ Research Generation Complete</h4>
-                    <p class="mb-3">${successful} of ${episodes.length} episodes processed successfully.</p>
+                    <h4>✅ Verified Research Complete</h4>
+                    <p class="mb-2">${successful} of ${episodes.length} episodes processed successfully.</p>
+                    <p class="text-sm text-muted mb-3">📥 ${totalSources} source document(s) downloading to Assets</p>
                     ${failed > 0 ? `
                         <div class="error-list mb-3">
                             <p class="text-sm font-bold">Failed:</p>

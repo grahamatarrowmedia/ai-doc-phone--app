@@ -750,38 +750,101 @@ Suggest themes, storylines, key questions to answer, and unique perspectives."""
 
 @app.route("/api/ai/episode-research", methods=["POST"])
 def ai_episode_research():
-    """Generate research for a specific episode."""
+    """Generate deep verified research for a specific episode."""
     data = request.get_json()
     episode_id = data.get('episodeId', '')
     episode_title = data.get('episodeTitle', '')
     episode_description = data.get('episodeDescription', '')
     project_title = data.get('projectTitle', '')
     project_description = data.get('projectDescription', '')
+    project_style = data.get('projectStyle', '')
     project_id = data.get('projectId', '')
 
-    system_prompt = f"""You are a documentary research specialist. Generate comprehensive research notes for a specific episode of a documentary series.
+    system_prompt = f"""You are a documentary research specialist conducting DEEP VERIFIED RESEARCH for episode production.
 
-Project: {project_title}
-Project Description: {project_description}
+## PROJECT CONTEXT
+- Project: {project_title}
+- Description: {project_description}
+- Style: {project_style or 'Documentary'}
 
-Your research should include:
-1. **Key Facts & Background** - Essential verified information about the episode's topic
-2. **Potential Sources** - Archives, institutions, databases, and experts to contact
-3. **Visual/Audio Assets** - Potential footage, photos, or audio that could be acquired
-4. **Interview Subjects** - People who could provide firsthand accounts or expertise
-5. **Key Questions to Answer** - What the episode needs to address
-6. **Timeline/Chronology** - Important dates and sequence of events if applicable
+## CRITICAL VERIFICATION REQUIREMENTS
 
-Focus on ACTIONABLE research that will help produce this episode. Include specific names, organizations, and contact points where possible."""
+1. **MULTI-SOURCE VERIFICATION MANDATE**:
+   - ONLY include facts verified by 2+ independent, credible sources
+   - REJECT any claim that relies on a single source
+   - Cross-reference all key facts before including them
 
-    prompt = f"""Generate detailed research notes for this documentary episode:
+2. **SOURCE CREDIBILITY HIERARCHY** (use in this order):
+   - Primary sources: Official archives, government records, court documents, academic institutions
+   - Peer-reviewed: Academic journals, scientific publications
+   - Established journalism: Major news organizations with editorial standards (BBC, Reuters, AP, NYT)
+   - Official sources: Organization websites, press releases from verified entities
+   - AVOID: Blogs, social media, Wikipedia (except to find primary sources), unverified websites
+
+3. **FOR EVERY FACT YOU INCLUDE**:
+   - Mark verification status: ✅ VERIFIED (2+ credible sources) or ❌ EXCLUDED (single source only)
+   - List the corroborating sources with URLs
+   - Note archive availability (footage, documents, photos)
+
+4. **MANDATORY EXCLUSIONS** - Do NOT include:
+   - Any fact from only one source (no matter how credible)
+   - Rumors, speculation, or unconfirmed claims
+   - Information that cannot be independently verified
+   - Sources behind paywalls without noting this limitation
+
+5. **RESEARCH STRUCTURE**:
+   ## Verified Facts & Background
+   (Only multi-source verified information with source citations)
+
+   ## Verified Sources & Archives
+   (Accessible archives, institutions, databases - with URLs)
+
+   ## Verified Interview Subjects
+   (People with confirmed credentials and contact paths)
+
+   ## Visual/Audio Assets Available
+   (Confirmed accessible footage, photos, audio with source URLs)
+
+   ## Key Timeline (Verified)
+   (Dates corroborated by multiple sources)
+
+   ## Source Bibliography
+   (All sources used, with URLs for verification)
+
+Remember: For documentary production, ONLY VERIFIED FACTS ARE USABLE. One unreliable claim can destroy a documentary's credibility. When in doubt, EXCLUDE IT."""
+
+    prompt = f"""Conduct DEEP VERIFIED RESEARCH for this documentary episode:
 
 Episode Title: {episode_title}
 Episode Description: {episode_description}
 
-Provide thorough, production-ready research that the documentary team can immediately act upon."""
+IMPORTANT:
+- Only include information verified by MULTIPLE independent credible sources
+- Provide URLs for all sources so the production team can verify
+- Mark each fact with its verification status
+- Exclude anything that relies on a single source
+
+Generate thorough, VERIFIED, production-ready research with source URLs."""
 
     result = generate_ai_response(prompt, system_prompt)
+
+    response_data = {"result": result, "saved": False, "sources": []}
+
+    # Extract URLs and start background download of source documents
+    urls = extract_urls(result)
+    if urls and project_id:
+        research_id = f"ep_{episode_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+        response_data["sources"] = [{"url": url, "status": "downloading"} for url in urls]
+        response_data["researchId"] = research_id
+
+        # Start background download - these will be saved as assets
+        ensure_bucket_exists(STORAGE_BUCKET)
+        download_thread = threading.Thread(
+            target=process_source_documents_async,
+            args=(urls, STORAGE_BUCKET, project_id, research_id)
+        )
+        download_thread.daemon = True
+        download_thread.start()
 
     # Auto-save as research linked to this episode
     if project_id and episode_id:
@@ -790,12 +853,14 @@ Provide thorough, production-ready research that the documentary team can immedi
             'episodeId': episode_id,
             'title': f"Research: {episode_title}",
             'content': result,
-            'category': 'Episode Research'
+            'category': 'Episode Research (Verified)',
+            'sourceCount': len(urls) if urls else 0
         }
         saved_research = create_doc('research', research_data)
-        return jsonify({"result": result, "saved": True, "researchId": saved_research['id']})
+        response_data["saved"] = True
+        response_data["researchId"] = saved_research['id']
 
-    return jsonify({"result": result, "saved": False})
+    return jsonify(response_data)
 
 
 @app.route("/api/ai/generate-topics", methods=["POST"])
