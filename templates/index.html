@@ -1339,11 +1339,15 @@
 
                 console.log('Save response:', response);
 
-                // Show success with asset count
-                const assetsMsg = response.assetsCreated > 0
-                    ? `\n${response.assetsCreated} reference links added to Assets.`
-                    : '';
-                alert(`Research saved successfully!${assetsMsg}`);
+                // Show success with asset and download count
+                let msg = 'Research saved successfully!';
+                if (response.assetsCreated > 0) {
+                    msg += `\n${response.assetsCreated} reference links added to Assets.`;
+                }
+                if (response.downloadsStarted > 0) {
+                    msg += `\nDownloading ${response.downloadsStarted} pages as PDFs in background...`;
+                }
+                alert(msg);
 
                 // Reload project data to show saved research indicator and new assets
                 await loadProjectData(state.currentProject);
@@ -1693,25 +1697,40 @@
                     </div>
                 ` : ''}
 
-                ${regularAssets.map(a => `
+                ${regularAssets.map(a => {
+                    const statusBadge = a.status === 'Downloaded' ? 'badge-green'
+                        : a.status === 'Downloading' ? 'badge-blue'
+                        : a.status === 'Failed' ? 'badge-red'
+                        : 'badge-orange';
+                    const statusIcon = a.status === 'Downloaded' ? '✓'
+                        : a.status === 'Downloading' ? '⏳'
+                        : a.status === 'Failed' ? '✗'
+                        : '';
+                    return `
                     <div class="card">
                         <div class="item-header">
                             <div class="flex-1">
                                 <div class="flex gap-2 mb-1 items-center">
                                     <h3>${a.title}</h3>
                                     <span class="badge badge-gray">${a.type}</span>
+                                    <span class="badge ${statusBadge}">${statusIcon} ${a.status}</span>
                                 </div>
-                                <p class="text-sm">Source: ${a.source}</p>
-                                <span class="badge badge-orange mt-2">${a.status}</span>
-                                ${a.notes ? `<p class="text-sm mt-2">${a.notes}</p>` : ''}
+                                <p class="text-sm"><a href="${a.source}" target="_blank" class="text-link">🔗 ${truncateUrl(a.source)}</a></p>
+                                ${a.gcsPath ? `<p class="text-sm text-success mt-1">📄 PDF: ${a.filename || 'document.pdf'} (${formatBytes(a.sizeBytes || 0)})</p>` : ''}
+                                ${a.downloadError ? `<p class="text-sm text-error mt-1">Error: ${a.downloadError}</p>` : ''}
+                                ${a.notes && !a.isResearchLink ? `<p class="text-sm mt-2 text-muted">${a.notes}</p>` : ''}
                             </div>
                             <div class="item-actions">
+                                ${a.gcsPath ? `
+                                    <button class="btn-icon" onclick="viewSourceDocument('${a.gcsPath}')" title="View PDF">👁️</button>
+                                    <a href="/api/download/${a.gcsPath}" class="btn-icon" title="Download PDF">⬇️</a>
+                                ` : ''}
                                 <button class="btn-icon" onclick="showEditModal('asset', '${a.id}')">✏️</button>
                                 <button class="btn-icon" onclick="deleteItem('assets', '${a.id}')">🗑️</button>
                             </div>
                         </div>
                     </div>
-                `).join('')}
+                `}).join('')}
             `;
         }
 

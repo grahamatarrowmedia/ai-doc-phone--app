@@ -226,6 +226,11 @@ body {
 .badge-purple { background: #e9d5ff; color: #6b21a8; }
 .badge-orange { background: #fed7aa; color: #9a3412; }
 .badge-gray { background: var(--gray-200); color: var(--gray-700); }
+.badge-red { background: #fee2e2; color: #991b1b; }
+
+.text-link { color: var(--primary); text-decoration: none; }
+.text-link:hover { text-decoration: underline; }
+.text-error { color: #dc2626; }
 
 /* Episode List */
 .episode-list {
