@@ -1050,14 +1050,14 @@ def delete_episode_research(episode_id):
         return jsonify({"error": str(e)}), 500
 
 
-def download_research_link(asset_id, url, project_id):
+def download_research_link(asset_id, url, project_id, timeout=15):
     """Download a research link and convert to PDF, updating the asset."""
     try:
         print(f"[DEBUG] Downloading research link: {url[:60]}...")
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
-        response = requests.get(url, headers=headers, timeout=DOWNLOAD_TIMEOUT, allow_redirects=True)
+        response = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
         response.raise_for_status()
 
         content_type = response.headers.get('Content-Type', '').split(';')[0].strip()
@@ -1238,22 +1238,39 @@ def save_episode_research(episode_id):
                 except Exception as link_error:
                     print(f"[ERROR] Failed to create asset for {link_url}: {link_error}")
 
-        # Start background download of all links
-        if links_to_download:
-            print(f"[DEBUG] Starting background download of {len(links_to_download)} links")
-            threading.Thread(
-                target=process_research_links_async,
-                args=(links_to_download,),
-                daemon=True
-            ).start()
+        # Download links synchronously (Cloud Run terminates idle instances)
+        downloads_completed = 0
+        downloads_failed = 0
+        MAX_DOWNLOADS = 10  # Limit to avoid request timeout
 
-        print(f"[DEBUG] Created {links_created} new assets from research links")
+        if links_to_download:
+            print(f"[DEBUG] Downloading up to {MAX_DOWNLOADS} of {len(links_to_download)} links")
+            for asset_id, link_url, proj_id in links_to_download[:MAX_DOWNLOADS]:
+                if download_research_link(asset_id, link_url, proj_id, timeout=10):
+                    downloads_completed += 1
+                else:
+                    downloads_failed += 1
+
+            # Mark remaining links as "Pending" (not downloaded yet)
+            for asset_id, link_url, proj_id in links_to_download[MAX_DOWNLOADS:]:
+                try:
+                    asset_ref = db.collection(COLLECTIONS['assets']).document(asset_id)
+                    asset_ref.update({
+                        'status': 'Pending',
+                        'updatedAt': datetime.utcnow().isoformat()
+                    })
+                except:
+                    pass
+
+        print(f"[DEBUG] Created {links_created} new assets, downloaded {downloads_completed}, failed {downloads_failed}")
         return jsonify({
             "success": True,
             "episodeId": episode_id,
             "linksExtracted": len(markdown_links) if project_id else 0,
             "assetsCreated": links_created,
-            "downloadsStarted": len(links_to_download)
+            "downloadsCompleted": downloads_completed,
+            "downloadsFailed": downloads_failed,
+            "downloadsPending": max(0, len(links_to_download) - MAX_DOWNLOADS)
         })
     except Exception as e:
         print(f"[ERROR] Failed to save research: {e}")

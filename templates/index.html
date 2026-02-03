@@ -1344,8 +1344,14 @@
                 if (response.assetsCreated > 0) {
                     msg += `\n${response.assetsCreated} reference links added to Assets.`;
                 }
-                if (response.downloadsStarted > 0) {
-                    msg += `\nDownloading ${response.downloadsStarted} pages as PDFs in background...`;
+                if (response.downloadsCompleted > 0) {
+                    msg += `\n${response.downloadsCompleted} pages downloaded as PDFs.`;
+                }
+                if (response.downloadsFailed > 0) {
+                    msg += `\n${response.downloadsFailed} downloads failed.`;
+                }
+                if (response.downloadsPending > 0) {
+                    msg += `\n${response.downloadsPending} pending (use Download All).`;
                 }
                 alert(msg);
 
@@ -1700,10 +1706,12 @@
                 ${regularAssets.map(a => {
                     const statusBadge = a.status === 'Downloaded' ? 'badge-green'
                         : a.status === 'Downloading' ? 'badge-blue'
+                        : a.status === 'Pending' ? 'badge-purple'
                         : a.status === 'Failed' ? 'badge-red'
                         : 'badge-orange';
                     const statusIcon = a.status === 'Downloaded' ? '✓'
                         : a.status === 'Downloading' ? '⏳'
+                        : a.status === 'Pending' ? '⋯'
                         : a.status === 'Failed' ? '✗'
                         : '';
                     return `
