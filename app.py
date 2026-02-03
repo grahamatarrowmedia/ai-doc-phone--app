@@ -1148,7 +1148,7 @@ Suggest themes, storylines, key questions to answer, and unique perspectives."""
 
 @app.route("/api/ai/episode-research", methods=["POST"])
 def ai_episode_research():
-    """Generate deep verified research for a specific episode."""
+    """Generate research for a documentary episode using simple AI query."""
     data = request.get_json()
     episode_id = data.get('episodeId', '')
     episode_title = data.get('episodeTitle', '')
@@ -1158,135 +1158,87 @@ def ai_episode_research():
     project_style = data.get('projectStyle', '')
     project_id = data.get('projectId', '')
 
-    system_prompt = f"""You are a documentary research specialist conducting DEEP VERIFIED RESEARCH for episode production.
+    system_prompt = f"""You are a documentary research specialist. Your task is to provide comprehensive research for documentary production.
 
 ## PROJECT CONTEXT
 - Project: {project_title}
 - Description: {project_description}
 - Style: {project_style or 'Documentary'}
 
-## CRITICAL VERIFICATION REQUIREMENTS
+## RESEARCH OUTPUT FORMAT
 
-1. **MULTI-SOURCE VERIFICATION MANDATE**:
-   - ONLY include facts verified by 2+ independent, credible sources
-   - REJECT any claim that relies on a single source
-   - Cross-reference all key facts before including them
+Provide your research in these sections:
 
-2. **SOURCE CREDIBILITY HIERARCHY** (use in this order):
-   - Primary sources: Official archives, government records, court documents, academic institutions
-   - Peer-reviewed: Academic journals, scientific publications
-   - Established journalism: Major news organizations with editorial standards (BBC, Reuters, AP, NYT)
-   - Official sources: Organization websites, press releases from verified entities
-   - AVOID: Blogs, social media, Wikipedia (except to find primary sources), unverified websites
+### Key Facts & Background
+- Important facts about the topic
+- Historical context
+- Current relevance
 
-3. **FOR EVERY FACT YOU INCLUDE**:
-   - Mark verification status: ✅ VERIFIED (2+ credible sources) or ❌ EXCLUDED (single source only)
-   - List the corroborating sources with REAL, WORKING URLs
-   - Note archive availability (footage, documents, photos)
+### Suggested Sources
+For each source, provide:
+- Source name and type (website, book, archive, etc.)
+- URL if available (use real URLs from known sources like BBC, Reuters, Wikipedia, government sites, etc.)
+- What information it provides
 
-4. **URL REQUIREMENTS**:
-   - ONLY include real, verifiable URLs that actually exist
-   - NEVER use placeholder text like "undefined", "[URL]", or fake URLs
-   - If you don't know the exact URL, describe where to find it instead
-   - Format links as: [Source Name](https://actual-url.com)
-   - Test that URLs are from real domains (.gov, .edu, .org, major news sites)
+### Potential Interview Subjects
+- Experts in the field
+- People with direct experience
+- Their credentials and why they're relevant
 
-5. **MANDATORY EXCLUSIONS** - Do NOT include:
-   - Any fact from only one source (no matter how credible)
-   - Rumors, speculation, or unconfirmed claims
-   - Information that cannot be independently verified
-   - Sources behind paywalls without noting this limitation
+### Visual & Audio Ideas
+- Stock footage suggestions
+- Archive material locations
+- B-roll concepts
 
-6. **RESEARCH STRUCTURE**:
-   ## Verified Facts & Background
-   (Only multi-source verified information with source citations)
+### Timeline of Key Events
+- Important dates and milestones
+- Chronological context
 
-   ## Verified Sources & Archives
-   (Accessible archives, institutions, databases - with URLs)
+### Further Reading
+- Books, articles, documentaries on the topic
+- Include links where possible
 
-   ## Verified Interview Subjects
-   (People with confirmed credentials and contact paths)
+Remember to provide REAL URLs from credible sources (news sites, .gov, .edu, .org, Wikipedia, etc.)."""
 
-   ## Visual/Audio Assets Available
-   (Confirmed accessible footage, photos, audio with source URLs)
-
-   ## Key Timeline (Verified)
-   (Dates corroborated by multiple sources)
-
-   ## Source Bibliography
-   (All sources used, with URLs for verification)
-
-Remember: For documentary production, ONLY VERIFIED FACTS ARE USABLE. One unreliable claim can destroy a documentary's credibility. When in doubt, EXCLUDE IT."""
-
-    prompt = f"""Conduct DEEP VERIFIED RESEARCH for this documentary episode:
+    prompt = f"""Research this documentary episode:
 
 Episode Title: {episode_title}
 Episode Description: {episode_description}
 
-IMPORTANT:
-- Only include information verified by MULTIPLE independent credible sources
-- Provide URLs for all sources so the production team can verify
-- Mark each fact with its verification status
-- Exclude anything that relies on a single source
+Provide comprehensive research with real source links that the production team can use."""
 
-Generate thorough, VERIFIED, production-ready research with source URLs."""
+    # Simple AI query - no grounding or downloads
+    try:
+        result = generate_ai_response(prompt, system_prompt)
+    except Exception as e:
+        print(f"Research generation error: {e}")
+        return jsonify({"error": str(e)}), 500
 
-    # Use Google Search grounding for real, verified sources
-    grounded_result = generate_grounded_research(prompt, system_prompt)
-    result = grounded_result['text']
-    grounded_sources = grounded_result.get('sources', [])
-
-    response_data = {"result": result, "saved": False, "sources": [], "groundedSources": grounded_sources}
-
-    # Combine URLs from AI response and grounding metadata
+    # Extract URLs from the response
     urls = extract_urls(result)
-    # Add URLs from grounding sources (these are verified by Google Search)
-    for gs in grounded_sources:
-        if gs.get('uri') and gs['uri'] not in urls:
-            urls.insert(0, gs['uri'])  # Prioritize grounded sources
 
-    if urls and project_id:
-        research_id = f"ep_{episode_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
-        response_data["researchId"] = research_id
+    response_data = {
+        "result": result,
+        "saved": False,
+        "sources": [{"url": url, "status": "found"} for url in urls[:10]]
+    }
 
-        # Download sources directly (skip validation to save time)
-        # Failed downloads will be marked as errors
-        MAX_SYNC_DOWNLOADS = 3
-        ensure_bucket_exists(STORAGE_BUCKET)
-        downloaded_sources = []
-        print(f"Downloading up to {MAX_SYNC_DOWNLOADS} sources...")
-        for url in urls[:MAX_SYNC_DOWNLOADS]:
-            try:
-                result_download = download_and_store(url, STORAGE_BUCKET, project_id, research_id)
-                downloaded_sources.append({
-                    "url": url,
-                    "status": "completed" if result_download.get("status") == "success" else "error",
-                    "title": result_download.get("title", ""),
-                    "filename": result_download.get("filename", ""),
-                    "error": result_download.get("error")
-                })
-            except Exception as e:
-                downloaded_sources.append({"url": url, "status": "error", "error": str(e)})
-
-        # Mark remaining URLs as pending (not downloaded yet)
-        for url in urls[MAX_SYNC_DOWNLOADS:]:
-            downloaded_sources.append({"url": url, "status": "pending"})
-
-        response_data["sources"] = downloaded_sources
-
-    # Auto-save as research linked to this episode
+    # Auto-save research to database
     if project_id and episode_id:
-        research_data = {
-            'projectId': project_id,
-            'episodeId': episode_id,
-            'title': f"Research: {episode_title}",
-            'content': result,
-            'category': 'Episode Research (Verified)',
-            'sourceCount': len(urls) if urls else 0
-        }
-        saved_research = create_doc('research', research_data)
-        response_data["saved"] = True
-        response_data["researchId"] = saved_research['id']
+        try:
+            research_data = {
+                'projectId': project_id,
+                'episodeId': episode_id,
+                'title': f"Research: {episode_title}",
+                'content': result,
+                'category': 'Episode Research',
+                'sourceCount': len(urls)
+            }
+            saved_research = create_doc('research', research_data)
+            response_data["saved"] = True
+            response_data["researchId"] = saved_research['id']
+        except Exception as e:
+            print(f"Error saving research: {e}")
 
     return jsonify(response_data)
 
