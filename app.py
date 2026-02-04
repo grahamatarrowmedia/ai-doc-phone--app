@@ -658,6 +658,7 @@ def get_asset_file(asset_id):
     import google.auth
     from google.auth import iam
     from google.auth.transport.requests import Request
+    import google.oauth2.service_account
 
     asset = get_doc('assets', asset_id)
     if not asset:
@@ -688,42 +689,45 @@ def get_asset_file(asset_id):
         if file_size > MAX_DIRECT_DOWNLOAD:
             print(f"Large file detected, generating signed URL for direct GCS download")
 
-            # Get credentials and service account email
+            # Get credentials
             credentials, project = google.auth.default()
-
-            # Get service account email
-            if hasattr(credentials, 'service_account_email'):
-                service_account_email = credentials.service_account_email
-            else:
-                # Fallback: get from metadata server
-                import requests as req
-                metadata_url = 'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email'
-                resp = req.get(metadata_url, headers={'Metadata-Flavor': 'Google'}, timeout=5)
-                service_account_email = resp.text
-
-            print(f"Using service account: {service_account_email}")
-
-            # Refresh credentials if needed
             auth_request = Request()
+
+            # Refresh credentials to get access token
             if hasattr(credentials, 'refresh'):
                 credentials.refresh(auth_request)
 
-            # Create IAM-based signing credentials
-            signing_credentials = iam.Signer(
+            # Get service account email from metadata server (most reliable method on Cloud Run)
+            import requests as req
+            metadata_url = 'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email'
+            resp = req.get(metadata_url, headers={'Metadata-Flavor': 'Google'}, timeout=5)
+            service_account_email = resp.text.strip()
+
+            print(f"Using service account: {service_account_email}")
+
+            # Create IAM signer for signing without local private key
+            signer = iam.Signer(
                 auth_request,
                 credentials,
                 service_account_email
             )
 
-            # Generate signed URL using IAM signer (valid for 1 hour)
+            # Create signing credentials wrapper
+            signing_credentials = google.oauth2.service_account.Credentials(
+                signer=signer,
+                service_account_email=service_account_email,
+                token_uri='https://oauth2.googleapis.com/token',
+                project_id=project,
+            )
+
+            # Generate signed URL (valid for 1 hour)
             signed_url = blob.generate_signed_url(
                 version='v4',
                 expiration=timedelta(hours=1),
                 method='GET',
                 response_disposition=f'attachment; filename="{filename}"',
                 response_type=content_type,
-                service_account_email=service_account_email,
-                access_token=credentials.token,
+                credentials=signing_credentials,
             )
 
             print(f"Redirecting to signed URL for {filename}")
