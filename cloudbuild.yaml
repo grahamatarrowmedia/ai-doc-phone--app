@@ -28,8 +28,6 @@ steps:
       - '2Gi'
       - '--timeout'
       - '3600'
-      - '--execution-environment'
-      - 'gen2'
       - '--cpu'
       - '2'
 

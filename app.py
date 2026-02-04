@@ -654,29 +654,40 @@ def upload_asset_file():
 def get_asset_file(asset_id):
     """Download an asset's file using streaming for all sizes."""
     from flask import stream_with_context
+    import sys
+
+    print(f"Download request for asset: {asset_id}", file=sys.stderr)
 
     asset = get_doc('assets', asset_id)
     if not asset:
+        print(f"Asset not found: {asset_id}", file=sys.stderr)
         return jsonify({"error": "Asset not found"}), 404
 
     if not asset.get('gcsPath'):
+        print(f"Asset has no gcsPath: {asset_id}", file=sys.stderr)
         return jsonify({"error": "Asset has no file"}), 404
+
+    gcs_path = asset.get('gcsPath')
+    print(f"Attempting to access GCS path: {gcs_path}", file=sys.stderr)
 
     try:
         bucket = storage_client.bucket(STORAGE_BUCKET)
-        blob = bucket.blob(asset['gcsPath'])
+        blob = bucket.blob(gcs_path)
 
+        print(f"Checking if blob exists...", file=sys.stderr)
         if not blob.exists():
+            print(f"Blob does not exist: {gcs_path}", file=sys.stderr)
             return jsonify({"error": "File not found in storage"}), 404
 
         content_type = asset.get('mimeType', 'application/octet-stream')
         filename = asset.get('filename', 'download')
 
         # Get file size
+        print(f"Reloading blob metadata...", file=sys.stderr)
         blob.reload()
         file_size = blob.size
 
-        print(f"Streaming asset file: {asset['gcsPath']} ({file_size} bytes)")
+        print(f"Streaming asset file: {gcs_path} ({file_size} bytes)", file=sys.stderr)
 
         # Stream using GCS range requests - this works within Cloud Run's response limits
         # Each chunk is fetched separately, avoiding memory issues
@@ -702,12 +713,14 @@ def get_asset_file(asset_id):
 
             print(f"Stream complete: {chunk_num} chunks, {file_size} bytes total")
 
+        # Use chunked transfer encoding for streaming (no Content-Length)
+        # This allows Cloud Run to stream without buffering the entire response
         response = Response(
             stream_with_context(generate()),
             mimetype=content_type,
         )
         response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
-        response.headers['Content-Length'] = str(file_size)
+        response.headers['X-Content-Length'] = str(file_size)  # Hint for client progress
         return response
 
     except Exception as e:
