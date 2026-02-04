@@ -702,16 +702,13 @@ def get_asset_file(asset_id):
 
             print(f"Stream complete: {chunk_num} chunks, {file_size} bytes total")
 
-        return Response(
+        response = Response(
             stream_with_context(generate()),
             mimetype=content_type,
-            headers={
-                'Content-Disposition': f'attachment; filename="{filename}"',
-                'Content-Length': str(file_size),
-                'Accept-Ranges': 'bytes',
-            },
-            direct_passthrough=True
         )
+        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response.headers['Content-Length'] = str(file_size)
+        return response
 
     except Exception as e:
         print(f"Error downloading asset file: {e}")
