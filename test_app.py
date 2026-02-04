@@ -778,31 +778,123 @@ Include:
     return jsonify({"result": result})
 
 
+def get_research_document_contents(episode_id=None, series_id=None, project_id=None):
+    """Fetch and read contents of research documents for context."""
+    documents_context = []
+
+    try:
+        # Get episode research documents
+        if episode_id:
+            docs = db.collection(COLLECTIONS['assets']).where('episodeId', '==', episode_id).where('isResearchDocument', '==', True).stream()
+            for doc in docs:
+                data = doc.to_dict()
+                content = read_document_content(data.get('gcsPath'), data.get('mimeType', ''))
+                if content:
+                    documents_context.append({
+                        'source': f"Episode Document: {data.get('title', data.get('filename', 'Unknown'))}",
+                        'content': content
+                    })
+
+        # Get series research documents
+        if series_id:
+            docs = db.collection(COLLECTIONS['assets']).where('seriesId', '==', series_id).where('isResearchDocument', '==', True).stream()
+            for doc in docs:
+                data = doc.to_dict()
+                content = read_document_content(data.get('gcsPath'), data.get('mimeType', ''))
+                if content:
+                    documents_context.append({
+                        'source': f"Series Document: {data.get('title', data.get('filename', 'Unknown'))}",
+                        'content': content
+                    })
+
+        # Get project-level research documents
+        if project_id:
+            docs = db.collection(COLLECTIONS['assets']).where('projectId', '==', project_id).where('isResearchDocument', '==', True).stream()
+            for doc in docs:
+                data = doc.to_dict()
+                # Only include project-level docs (not linked to episode/series)
+                if not data.get('episodeId') and not data.get('seriesId'):
+                    content = read_document_content(data.get('gcsPath'), data.get('mimeType', ''))
+                    if content:
+                        documents_context.append({
+                            'source': f"Project Document: {data.get('title', data.get('filename', 'Unknown'))}",
+                            'content': content
+                        })
+    except Exception as e:
+        print(f"Error fetching research documents: {e}")
+
+    return documents_context
+
+
+def read_document_content(gcs_path, mime_type=''):
+    """Read content from a document in GCS."""
+    if not gcs_path:
+        return None
+
+    try:
+        bucket = storage_client.bucket(STORAGE_BUCKET)
+        blob = bucket.blob(gcs_path)
+        content = blob.download_as_bytes()
+
+        # For text-based files, decode to string
+        if mime_type.startswith('text/') or gcs_path.endswith(('.txt', '.md', '.csv')):
+            return content.decode('utf-8', errors='ignore')[:10000]  # Limit to 10k chars
+
+        # For PDFs and other binary formats, we'd need extraction
+        # For now, skip binary files
+        if gcs_path.endswith('.pdf'):
+            return f"[PDF Document - content extraction not implemented]"
+
+        return None
+    except Exception as e:
+        print(f"Error reading document {gcs_path}: {e}")
+        return None
+
+
 @app.route("/api/ai/simple-research", methods=["POST"])
 def ai_simple_research():
-    """Simple AI research query for episode background research."""
+    """Simple AI research query for episode background research, augmented with research documents."""
     data = request.get_json()
     title = data.get('title', '')
     description = data.get('description', '')
     episode_id = data.get('episodeId', '')
+    series_id = data.get('seriesId', '')
+    project_id = data.get('projectId', '')
     save_research = data.get('save', True)
+
+    # Fetch research documents for context
+    research_docs = get_research_document_contents(
+        episode_id=episode_id,
+        series_id=series_id,
+        project_id=project_id
+    )
+
+    # Build context from research documents
+    context_section = ""
+    if research_docs:
+        context_section = "\n\n## Reference Documents\n\nThe following research documents have been provided as context:\n\n"
+        for doc in research_docs:
+            context_section += f"### {doc['source']}\n{doc['content']}\n\n"
 
     prompt = f"""Research the following documentary topic:
 
 Title: {title}
 Description: {description}
-
-Provide:
+{context_section}
+Based on the topic{' and the reference documents above' if research_docs else ''}, provide:
 - Key facts and background information
 - Relevant sources and references
 - Interview suggestions
-- Visual/archive material recommendations"""
+- Visual/archive material recommendations
+
+{'Please incorporate and build upon the information from the provided reference documents.' if research_docs else ''}"""
 
     result = generate_ai_response(prompt)
     response_data = {
         "result": result,
         "title": title,
-        "saved": False
+        "saved": False,
+        "documentsUsed": len(research_docs)
     }
 
     if save_research and episode_id:

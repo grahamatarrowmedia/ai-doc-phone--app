@@ -1139,7 +1139,7 @@
                                         📖 View Saved
                                     </button>
                                 ` : ''}
-                                <button class="ai-button-sm" onclick="doSimpleResearch('${ep.id}', '${ep.title.replace(/'/g, "\\'")}', '${(ep.description || '').replace(/'/g, "\\'")}')">
+                                <button class="ai-button-sm" onclick="doSimpleResearch('${ep.id}', '${ep.title.replace(/'/g, "\\'")}', '${(ep.description || '').replace(/'/g, "\\'")}', '${ep.seriesId || ''}')">
                                     🔍 ${ep.research ? 'Regenerate' : 'Research'}
                                 </button>
                             </div>
@@ -1271,9 +1271,10 @@
             }
         }
 
-        async function doSimpleResearch(episodeId, title, description) {
+        async function doSimpleResearch(episodeId, title, description, seriesId = '') {
             console.log('=== doSimpleResearch START ===');
             console.log('episodeId:', episodeId);
+            console.log('seriesId:', seriesId);
             console.log('title:', title);
             console.log('description:', description);
             console.log('state.currentProject:', state.currentProject);
@@ -1285,6 +1286,7 @@
                 <div class="ai-section">
                     <h4>🔍 Researching: ${title}</h4>
                     <p class="text-sm text-muted mb-3">Gathering background research with source links...</p>
+                    <p class="text-xs text-muted">Using uploaded research documents as context...</p>
                     <div class="loading-state">
                         <div class="spinner"></div>
                         <p>This may take a moment...</p>
@@ -1299,6 +1301,7 @@
                     title: title,
                     description: description,
                     episodeId: episodeId,
+                    seriesId: seriesId,
                     projectId: state.currentProject,
                     save: false
                 });
@@ -1326,10 +1329,16 @@
                 console.log('Parsed HTML length:', htmlContent.length);
                 console.log('First 500 chars of HTML:', htmlContent.substring(0, 500));
 
+                const docsUsed = response.documentsUsed || 0;
+                const docsInfo = docsUsed > 0
+                    ? `<p class="text-success text-xs mb-2">📚 Used ${docsUsed} research document${docsUsed > 1 ? 's' : ''} as context</p>`
+                    : '';
+
                 content.innerHTML = `
                     <div class="ai-section">
                         <h4>🔍 Research: ${title}</h4>
                         <p class="text-muted text-sm mb-2">Click Save to store this research with the episode</p>
+                        ${docsInfo}
                         <div class="ai-result research-result-content">
                             ${htmlContent}
                         </div>
