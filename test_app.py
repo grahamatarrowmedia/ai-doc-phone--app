@@ -1,87 +1,195 @@
 """
-Documentary Production App - Local test version with mocked responses
-No GCP dependencies required for UI testing
+Documentary Production App - Local version with real GCP services
+Uses the same Firestore, GCS, and Vertex AI as Cloud Run version
 """
 import os
+import re
 import uuid
 import hashlib
-from datetime import datetime
+import threading
+import base64
+from datetime import datetime, timezone
+from urllib.parse import urlparse
+
+import requests
 from flask import Flask, render_template, request, jsonify, Response
+from google.cloud import firestore, storage
+from weasyprint import HTML
+import vertexai
+from vertexai.generative_models import GenerativeModel, Tool, grounding
 
 app = Flask(__name__)
 
-# In-memory storage for testing
-storage = {
-    'projects': [],
-    'episodes': [],
-    'series': [],
-    'research': [],
-    'interviews': [],
-    'shots': [],
-    'assets': [],
-    'scripts': []
+# Configuration - same as Cloud Run version
+PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "gbr-aim-aiengine-prod")
+LOCATION = os.environ.get("GCP_LOCATION", "us-central1")
+MODEL_NAME = os.environ.get("MODEL_NAME", "gemini-2.0-flash-001")
+STORAGE_BUCKET = os.environ.get("STORAGE_BUCKET", f"{PROJECT_ID}-doc-assets")
+MAX_URLS_PER_QUERY = 10
+DOWNLOAD_TIMEOUT = 30
+
+# App version and environment
+APP_VERSION = os.environ.get("APP_VERSION", "local-1.0.0")
+APP_ENV = os.environ.get("APP_ENV", "local")
+
+# Initialize Vertex AI
+vertexai.init(project=PROJECT_ID, location=LOCATION)
+model = GenerativeModel(MODEL_NAME)
+
+# Initialize Firestore
+db = firestore.Client(project=PROJECT_ID)
+
+# Initialize Cloud Storage
+storage_client = storage.Client(project=PROJECT_ID)
+
+# Collection names - same as production
+COLLECTIONS = {
+    'projects': 'doc_projects',
+    'episodes': 'doc_episodes',
+    'series': 'doc_series',
+    'research': 'doc_research',
+    'interviews': 'doc_interviews',
+    'shots': 'doc_shots',
+    'assets': 'doc_assets',
+    'scripts': 'doc_scripts',
+    'feedback': 'doc_feedback'
 }
 
-# Mock document storage
-MOCK_DOCUMENTS = {}
+
+# ============== Helper Functions ==============
+
+def doc_to_dict(doc):
+    """Convert Firestore document to dict with id."""
+    if doc.exists:
+        data = doc.to_dict()
+        data['id'] = doc.id
+        return data
+    return None
 
 
-def init_sample_data():
-    """Initialize sample data."""
-    if storage['projects']:
-        return storage['projects'][0]['id']
+def get_all_docs(collection_name, project_id=None):
+    """Get all documents from a collection, optionally filtered by project."""
+    collection = db.collection(COLLECTIONS[collection_name])
+    if project_id:
+        docs = collection.where('projectId', '==', project_id).stream()
+    else:
+        docs = collection.stream()
+    return [doc_to_dict(doc) for doc in docs]
 
-    project_id = str(uuid.uuid4())
 
-    storage['projects'] = [{
-        'id': project_id,
-        'title': 'Apollo 11: Journey to the Moon',
-        'description': 'A comprehensive documentary series exploring the historic first moon landing',
-        'status': 'In Production',
-        'createdAt': datetime.utcnow().isoformat()
-    }]
+def get_doc(collection_name, doc_id):
+    """Get a single document by ID."""
+    doc = db.collection(COLLECTIONS[collection_name]).document(doc_id).get()
+    return doc_to_dict(doc)
 
-    # Create series
-    series1_id = str(uuid.uuid4())
-    series2_id = str(uuid.uuid4())
-    storage['series'] = [
-        {'id': series1_id, 'projectId': project_id, 'name': 'The Beginning', 'description': 'Origins of the space race', 'order': 1, 'createdAt': datetime.utcnow().isoformat()},
-        {'id': series2_id, 'projectId': project_id, 'name': 'The Mission', 'description': 'The Apollo 11 mission itself', 'order': 2, 'createdAt': datetime.utcnow().isoformat()}
-    ]
 
-    storage['episodes'] = [
-        {'id': str(uuid.uuid4()), 'projectId': project_id, 'seriesId': series1_id, 'title': 'Episode 1: The Race Begins', 'description': 'Cold War context and the space race', 'status': 'Research', 'duration': '45 min'},
-        {'id': str(uuid.uuid4()), 'projectId': project_id, 'seriesId': series1_id, 'title': 'Episode 2: Preparation', 'description': 'Training and technical development', 'status': 'Planning', 'duration': '45 min'},
-        {'id': str(uuid.uuid4()), 'projectId': project_id, 'seriesId': series2_id, 'title': 'Episode 3: Launch', 'description': 'The Saturn V launch and journey to the moon', 'status': 'Planning', 'duration': '45 min'},
-        {'id': str(uuid.uuid4()), 'projectId': project_id, 'seriesId': series2_id, 'title': 'Episode 4: One Small Step', 'description': 'The lunar landing and moonwalk', 'status': 'Planning', 'duration': '45 min'}
-    ]
+def create_doc(collection_name, data):
+    """Create a new document."""
+    data['createdAt'] = datetime.now(timezone.utc).isoformat()
+    data['updatedAt'] = datetime.now(timezone.utc).isoformat()
+    doc_ref = db.collection(COLLECTIONS[collection_name]).document()
+    doc_ref.set(data)
+    data['id'] = doc_ref.id
+    return data
 
-    storage['research'] = [
-        {'id': str(uuid.uuid4()), 'projectId': project_id, 'title': 'NASA Archives Access', 'content': 'Contact: Dr. Sarah Mitchell at NASA History Office.', 'category': 'Archive'},
-        {'id': str(uuid.uuid4()), 'projectId': project_id, 'title': 'Cold War Context', 'content': 'Key sources: "The Right Stuff" by Tom Wolfe', 'category': 'Background'}
-    ]
 
-    storage['interviews'] = [
-        {'id': str(uuid.uuid4()), 'projectId': project_id, 'subject': 'Buzz Aldrin', 'role': 'Lunar Module Pilot', 'status': 'Confirmed', 'questions': 'What were your thoughts during descent?', 'notes': 'Available for 2-hour interview'},
-        {'id': str(uuid.uuid4()), 'projectId': project_id, 'subject': 'Gene Kranz', 'role': 'Flight Director', 'status': 'Requested', 'questions': 'Describe mission control during landing.', 'notes': 'Contact through NASA'}
-    ]
+def update_doc(collection_name, doc_id, data):
+    """Update an existing document."""
+    data['updatedAt'] = datetime.now(timezone.utc).isoformat()
+    db.collection(COLLECTIONS[collection_name]).document(doc_id).update(data)
+    return get_doc(collection_name, doc_id)
 
-    storage['shots'] = [
-        {'id': str(uuid.uuid4()), 'projectId': project_id, 'description': 'Kennedy Space Center launch pads', 'location': 'KSC, Florida', 'equipment': '4K drone', 'status': 'Scheduled', 'shootDate': '2026-03-15'},
-        {'id': str(uuid.uuid4()), 'projectId': project_id, 'description': 'Saturn V rocket at Space Center Houston', 'location': 'Houston, TX', 'equipment': 'Gimbal, 4K camera', 'status': 'Pending'}
-    ]
 
-    storage['assets'] = [
-        {'id': str(uuid.uuid4()), 'projectId': project_id, 'title': 'Mission Control Audio', 'type': 'Audio', 'source': 'NASA Archives', 'status': 'Acquired', 'notes': 'Full mission audio'},
-        {'id': str(uuid.uuid4()), 'projectId': project_id, 'title': 'Apollo 11 Launch Footage', 'type': 'Video', 'source': 'NASA/CBS', 'status': 'Licensing', 'notes': '16mm film transfer'}
-    ]
+def delete_doc(collection_name, doc_id):
+    """Delete a document."""
+    db.collection(COLLECTIONS[collection_name]).document(doc_id).delete()
+    return True
 
-    storage['scripts'] = [
-        {'id': str(uuid.uuid4()), 'projectId': project_id, 'title': 'Episode 1 Outline', 'content': 'ACT 1: COLD WAR CONTEXT\n- Sputnik shock (1957)\n- Kennedy\'s moon speech (1961)'}
-    ]
 
-    return project_id
+# ============== AI Functions ==============
 
+def generate_ai_response(prompt, system_prompt=""):
+    """Generate AI response using Vertex AI."""
+    try:
+        full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+        response = model.generate_content(full_prompt)
+        return response.text
+    except Exception as e:
+        return f"AI error: {str(e)}"
+
+
+# ============== Source Document Functions ==============
+
+def extract_urls(text):
+    """Extract URLs from text, limited to MAX_URLS_PER_QUERY."""
+    url_pattern = r'https?://[^\s<>\[\]()"\']+'
+    urls = re.findall(url_pattern, text)
+    cleaned_urls = []
+    for url in urls:
+        url = url.rstrip('.,;:!?)')
+        if url and len(url) > 10:
+            cleaned_urls.append(url)
+    unique_urls = list(dict.fromkeys(cleaned_urls))
+    return unique_urls[:MAX_URLS_PER_QUERY]
+
+
+def convert_to_pdf(html_content, url):
+    """Convert HTML content to PDF."""
+    try:
+        parsed = urlparse(url)
+        base_url = f"{parsed.scheme}://{parsed.netloc}"
+        if '<base' not in html_content.lower():
+            html_content = html_content.replace(
+                '<head>',
+                f'<head><base href="{base_url}">',
+                1
+            )
+        html = HTML(string=html_content, base_url=base_url)
+        pdf_bytes = html.write_pdf()
+        return pdf_bytes
+    except Exception as e:
+        print(f"PDF conversion error for {url}: {e}")
+        return None
+
+
+def download_and_store(url, bucket_name, project_id, research_id):
+    """Download a URL, convert to PDF, and store in GCS bucket."""
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        response = requests.get(url, headers=headers, timeout=DOWNLOAD_TIMEOUT)
+        response.raise_for_status()
+
+        html_content = response.text
+        pdf_bytes = convert_to_pdf(html_content, url)
+
+        if not pdf_bytes:
+            return None
+
+        url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+        parsed = urlparse(url)
+        domain = parsed.netloc.replace('www.', '')
+        filename = f"{domain}_{url_hash}.pdf"
+        blob_path = f"{project_id}/{research_id}/{filename}"
+
+        bucket = storage_client.bucket(bucket_name)
+        blob = bucket.blob(blob_path)
+        blob.upload_from_string(pdf_bytes, content_type='application/pdf')
+
+        return {
+            'url': url,
+            'gcsPath': blob_path,
+            'filename': filename,
+            'size': len(pdf_bytes),
+            'title': domain
+        }
+    except Exception as e:
+        print(f"Error downloading {url}: {e}")
+        return None
+
+
+# ============== Routes ==============
 
 @app.route("/")
 def index():
@@ -90,28 +198,24 @@ def index():
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "healthy", "mode": "test"})
+    return jsonify({"status": "healthy", "mode": APP_ENV, "version": APP_VERSION})
 
 
 # Project routes
 @app.route("/api/projects", methods=["GET"])
 def get_projects():
-    return jsonify(storage['projects'])
+    return jsonify(get_all_docs('projects'))
 
 
 @app.route("/api/projects", methods=["POST"])
 def create_project():
     data = request.get_json()
-    data['id'] = str(uuid.uuid4())
-    data['createdAt'] = datetime.utcnow().isoformat()
-    data['updatedAt'] = datetime.utcnow().isoformat()
-    storage['projects'].append(data)
-    return jsonify(data), 201
+    return jsonify(create_doc('projects', data)), 201
 
 
 @app.route("/api/projects/<project_id>", methods=["GET"])
 def get_project(project_id):
-    project = next((p for p in storage['projects'] if p['id'] == project_id), None)
+    project = get_doc('projects', project_id)
     if project:
         return jsonify(project)
     return jsonify({"error": "Project not found"}), 404
@@ -120,391 +224,202 @@ def get_project(project_id):
 @app.route("/api/projects/<project_id>", methods=["PUT"])
 def update_project(project_id):
     data = request.get_json()
-    for i, project in enumerate(storage['projects']):
-        if project['id'] == project_id:
-            storage['projects'][i].update(data)
-            storage['projects'][i]['updatedAt'] = datetime.utcnow().isoformat()
-            return jsonify(storage['projects'][i])
-    return jsonify({"error": "Project not found"}), 404
+    return jsonify(update_doc('projects', project_id, data))
 
 
 @app.route("/api/projects/<project_id>", methods=["DELETE"])
 def delete_project(project_id):
-    storage['projects'] = [p for p in storage['projects'] if p['id'] != project_id]
-    # Also delete related data
+    # Delete related data first
     for collection in ['episodes', 'series', 'research', 'interviews', 'shots', 'assets', 'scripts']:
-        storage[collection] = [item for item in storage[collection] if item.get('projectId') != project_id]
+        docs = db.collection(COLLECTIONS[collection]).where('projectId', '==', project_id).stream()
+        for doc in docs:
+            doc.reference.delete()
+    delete_doc('projects', project_id)
     return jsonify({"success": True})
 
 
-@app.route("/api/init-sample-data", methods=["POST"])
-def init_data():
-    project_id = init_sample_data()
-    return jsonify({"message": "Sample data created", "projectId": project_id})
+# Episodes
+@app.route("/api/projects/<project_id>/episodes", methods=["GET"])
+def get_episodes(project_id):
+    return jsonify(get_all_docs('episodes', project_id))
 
 
-# Generic CRUD for collections
-def get_collection_routes(collection_name):
-    def get_items(project_id):
-        items = [i for i in storage[collection_name] if i.get('projectId') == project_id]
-        return jsonify(items)
-    app.add_url_rule(f"/api/projects/<project_id>/{collection_name}", f"get_{collection_name}", get_items, methods=["GET"])
-
-    def create_item():
-        data = request.get_json()
-        data['id'] = str(uuid.uuid4())
-        data['createdAt'] = datetime.utcnow().isoformat()
-        storage[collection_name].append(data)
-        return jsonify(data), 201
-    app.add_url_rule(f"/api/{collection_name}", f"create_{collection_name}", create_item, methods=["POST"])
-
-    def update_item(item_id):
-        data = request.get_json()
-        for i, item in enumerate(storage[collection_name]):
-            if item['id'] == item_id:
-                storage[collection_name][i].update(data)
-                storage[collection_name][i]['updatedAt'] = datetime.utcnow().isoformat()
-                return jsonify(storage[collection_name][i])
-        return jsonify({"error": "Not found"}), 404
-    app.add_url_rule(f"/api/{collection_name}/<item_id>", f"update_{collection_name}", update_item, methods=["PUT"])
-
-    def delete_item(item_id):
-        storage[collection_name] = [i for i in storage[collection_name] if i['id'] != item_id]
-        return jsonify({"success": True})
-    # Skip generic delete for series and assets - they have custom handlers below
-    if collection_name not in ['series', 'assets']:
-        app.add_url_rule(f"/api/{collection_name}/<item_id>", f"delete_{collection_name}", delete_item, methods=["DELETE"])
+@app.route("/api/episodes", methods=["POST"])
+def create_episode():
+    data = request.get_json()
+    return jsonify(create_doc('episodes', data)), 201
 
 
-# Register routes for all collections
-for collection in ['episodes', 'series', 'research', 'interviews', 'shots', 'assets', 'scripts']:
-    get_collection_routes(collection)
+@app.route("/api/episodes/<episode_id>", methods=["PUT"])
+def update_episode(episode_id):
+    data = request.get_json()
+    return jsonify(update_doc('episodes', episode_id, data))
 
 
-# Series delete needs special handling to ungroup episodes
-@app.route("/api/series/<series_id>", methods=["DELETE"], endpoint="delete_series_with_ungroup")
-def delete_series_with_ungroup(series_id):
-    """Delete a series and ungroup its episodes."""
-    # Remove seriesId from all episodes in this series
-    for ep in storage['episodes']:
-        if ep.get('seriesId') == series_id:
-            ep['seriesId'] = None
-
-    storage['series'] = [s for s in storage['series'] if s['id'] != series_id]
+@app.route("/api/episodes/<episode_id>", methods=["DELETE"])
+def delete_episode(episode_id):
+    delete_doc('episodes', episode_id)
     return jsonify({"success": True})
 
 
-# Override the assets delete to handle mock document cleanup
-@app.route("/api/assets/<asset_id>", methods=["DELETE"], endpoint="delete_assets_with_cleanup")
-def delete_asset_with_cleanup(asset_id):
-    """Delete an asset and its mock document if it exists."""
-    # Find the asset first
-    asset = next((a for a in storage['assets'] if a['id'] == asset_id), None)
-    if asset and asset.get('gcsPath') and asset['gcsPath'] in MOCK_DOCUMENTS:
-        del MOCK_DOCUMENTS[asset['gcsPath']]
+# Series
+@app.route("/api/projects/<project_id>/series", methods=["GET"])
+def get_series(project_id):
+    return jsonify(get_all_docs('series', project_id))
 
-    storage['assets'] = [i for i in storage['assets'] if i['id'] != asset_id]
+
+@app.route("/api/series", methods=["POST"])
+def create_series():
+    data = request.get_json()
+    return jsonify(create_doc('series', data)), 201
+
+
+@app.route("/api/series/<series_id>", methods=["PUT"])
+def update_series(series_id):
+    data = request.get_json()
+    return jsonify(update_doc('series', series_id, data))
+
+
+@app.route("/api/series/<series_id>", methods=["DELETE"])
+def delete_series(series_id):
+    # Ungroup episodes first
+    episodes = db.collection(COLLECTIONS['episodes']).where('seriesId', '==', series_id).stream()
+    for ep in episodes:
+        ep.reference.update({'seriesId': None})
+    delete_doc('series', series_id)
     return jsonify({"success": True})
 
 
-# AI routes (mocked)
-@app.route("/api/ai/research", methods=["POST"])
-def ai_research():
+# Research
+@app.route("/api/projects/<project_id>/research", methods=["GET"])
+def get_research(project_id):
+    return jsonify(get_all_docs('research', project_id))
+
+
+@app.route("/api/research", methods=["POST"])
+def create_research():
     data = request.get_json()
-    query = data.get('query', 'your query')
-    project_id = data.get('projectId', 'default')
-    download_sources = data.get('downloadSources', True)
-
-    result_text = f"""## Deep Research Results: {query}
-
-### ✅ VERIFIED SOURCES (Multiple Corroboration)
-
-#### Primary Archives
-1. **NASA History Office** ✅ VERIFIED
-   - Source: https://www.nasa.gov/history/
-   - Corroborated by: National Archives, Smithsonian
-   - Archive Status: **ACCESSIBLE** - Original mission documents, audio recordings, photography
-   - Contact: NASA History Division, Washington DC
-
-2. **National Archives (NARA)** ✅ VERIFIED
-   - Source: https://www.archives.gov/
-   - Corroborated by: NASA, Library of Congress
-   - Archive Status: **ACCESSIBLE** - Official government records, declassified documents
-   - FOIA requests accepted
-
-3. **Smithsonian Air & Space Museum** ✅ VERIFIED
-   - Source: https://airandspace.si.edu/
-   - Corroborated by: NASA, academic publications
-   - Archive Status: **ACCESSIBLE** - Artifacts, photographs, oral histories
-
-### ⚠️ SINGLE SOURCE (Requires Additional Verification)
-
-- Kennedy Space Center Visitor Complex has promotional materials but should be cross-referenced with NASA official archives
-
-### Archive Availability Summary
-
-| Source | Documents | Audio | Video | Artifacts |
-|--------|-----------|-------|-------|-----------|
-| NASA History | ✅ | ✅ | ✅ | ❌ |
-| National Archives | ✅ | ✅ | ✅ | ❌ |
-| Smithsonian | ✅ | ✅ | Limited | ✅ |
-
-### Recommended Next Steps
-1. Submit FOIA request to NARA for declassified mission documents
-2. Contact NASA History Division for archive access
-3. Schedule research visit to Smithsonian archives
-
-*All sources have been verified against multiple independent references.*"""
-
-    response_data = {"result": result_text, "sources": []}
-
-    if download_sources:
-        research_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S") + "_" + hashlib.md5(query.encode()).hexdigest()[:8]
-        response_data["researchId"] = research_id
-
-        # Mock source documents
-        mock_sources = [
-            {"url": "https://www.nasa.gov/history/", "title": "NASA History", "filename": "nasa_history.pdf", "size_bytes": 125000},
-            {"url": "https://airandspace.si.edu/", "title": "Smithsonian Air & Space", "filename": "smithsonian.pdf", "size_bytes": 230000},
-            {"url": "https://archive.org/", "title": "Internet Archive", "filename": "archive.pdf", "size_bytes": 89000},
-        ]
-
-        response_data["sources"] = []
-        for src in mock_sources:
-            url_hash = hashlib.md5(src["url"].encode()).hexdigest()[:8]
-            gcs_path = f"{project_id}/{url_hash}_{src['filename']}"
-
-            # Create mock document content
-            MOCK_DOCUMENTS[gcs_path] = create_mock_document(src["title"], src["url"])
-
-            # Create mock asset
-            asset_id = str(uuid.uuid4())
-            storage['assets'].append({
-                'id': asset_id,
-                'projectId': project_id,
-                'researchId': research_id,
-                'title': src["title"],
-                'type': 'Document',
-                'source': src["url"],
-                'gcsPath': gcs_path,
-                'status': 'Acquired',
-                'isSourceDocument': True,
-                'sizeBytes': src["size_bytes"],
-                'filename': src["filename"],
-                'createdAt': datetime.utcnow().isoformat()
-            })
-
-            response_data["sources"].append({
-                "url": src["url"],
-                "status": "success",
-                "title": src["title"],
-                "gcsPath": gcs_path
-            })
-
-    return jsonify(response_data)
+    return jsonify(create_doc('research', data)), 201
 
 
-def create_mock_document(title, url):
-    """Create mock HTML document content."""
-    return f"""<!DOCTYPE html>
-<html>
-<head><title>{title}</title>
-<style>
-body {{ font-family: Arial, sans-serif; padding: 40px; max-width: 800px; margin: 0 auto; }}
-h1 {{ color: #333; border-bottom: 2px solid #2563eb; padding-bottom: 10px; }}
-.meta {{ color: #666; margin-bottom: 20px; }}
-.notice {{ background: #f0f9ff; border: 1px solid #bae6fd; padding: 15px; border-radius: 8px; margin-top: 20px; }}
-</style>
-</head>
-<body>
-<h1>{title}</h1>
-<p class="meta">Source: <a href="{url}">{url}</a></p>
-<p>This is a mock archived document for testing purposes.</p>
-<p>In production, this would be the actual PDF conversion of the source webpage.</p>
-<div class="notice"><strong>Test Mode:</strong> Deploy to production to see real PDF conversions.</div>
-</body>
-</html>""".encode()
-
-
-@app.route("/api/ai/interview-questions", methods=["POST"])
-def ai_interview():
+@app.route("/api/research/<research_id>", methods=["PUT"])
+def update_research(research_id):
     data = request.get_json()
-    return jsonify({"result": f"""## Interview Questions for {data.get('subject', 'Subject')}
-Role: {data.get('role', 'Role')}
-
-1. Can you describe the moment you first learned you would be part of this mission?
-2. What was going through your mind during the most critical moments?
-3. How did the training prepare you for the unexpected?
-4. What surprised you most about the experience?
-5. How has this shaped your perspective on life?
-6. What would you want future generations to understand?
-7. Were there moments of doubt, and how did you overcome them?
-8. What was the team dynamic like during high-pressure situations?
-
-*This is a mock AI response for testing purposes.*"""})
+    return jsonify(update_doc('research', research_id, data))
 
 
-@app.route("/api/ai/script-outline", methods=["POST"])
-def ai_script():
+@app.route("/api/research/<research_id>", methods=["DELETE"])
+def delete_research(research_id):
+    delete_doc('research', research_id)
+    return jsonify({"success": True})
+
+
+# Interviews
+@app.route("/api/projects/<project_id>/interviews", methods=["GET"])
+def get_interviews(project_id):
+    return jsonify(get_all_docs('interviews', project_id))
+
+
+@app.route("/api/interviews", methods=["POST"])
+def create_interview():
     data = request.get_json()
-    return jsonify({"result": f"""## Script Outline: {data.get('title', 'Episode')}
-Duration: {data.get('duration', '45 minutes')}
-
-### ACT 1: SETUP (0:00 - 10:00)
-- Opening hook with archival footage
-- Introduce main characters/subjects
-- Establish the stakes and context
-
-### ACT 2: DEVELOPMENT (10:00 - 30:00)
-- Deep dive into the main narrative
-- Expert interviews and analysis
-- Build tension toward climax
-
-### ACT 3: RESOLUTION (30:00 - 45:00)
-- Climactic sequence
-- Reflect on significance
-- Closing thoughts and legacy
-
-### VISUAL ELEMENTS
-- Archival footage integration
-- Modern interviews
-- Graphics and animation
-
-*This is a mock AI response for testing purposes.*"""})
+    return jsonify(create_doc('interviews', data)), 201
 
 
-@app.route("/api/ai/shot-ideas", methods=["POST"])
-def ai_shots():
+@app.route("/api/interviews/<interview_id>", methods=["PUT"])
+def update_interview(interview_id):
     data = request.get_json()
-    return jsonify({"result": f"""## Shot Ideas for: {data.get('scene', 'Scene')}
-
-1. **Wide Establishing Shot**
-   - Drone flyover at golden hour
-   - Equipment: DJI Inspire 3, 4K
-
-2. **Detail Close-ups**
-   - Macro lens on artifacts/documents
-   - Equipment: 100mm macro, slider
-
-3. **Interview Setup**
-   - Two-camera setup with rim lighting
-   - Equipment: Cinema cameras, softboxes
-
-4. **B-Roll Sequence**
-   - Slow motion environmental details
-   - Equipment: High-speed camera
-
-5. **Time-lapse**
-   - Day-to-night transition
-   - Equipment: Intervalometer, stabilized mount
-
-*This is a mock AI response for testing purposes.*"""})
+    return jsonify(update_doc('interviews', interview_id, data))
 
 
-@app.route("/api/ai/expand-topic", methods=["POST"])
-def ai_expand():
+@app.route("/api/interviews/<interview_id>", methods=["DELETE"])
+def delete_interview(interview_id):
+    delete_doc('interviews', interview_id)
+    return jsonify({"success": True})
+
+
+# Shots
+@app.route("/api/projects/<project_id>/shots", methods=["GET"])
+def get_shots(project_id):
+    return jsonify(get_all_docs('shots', project_id))
+
+
+@app.route("/api/shots", methods=["POST"])
+def create_shot():
     data = request.get_json()
-    return jsonify({"result": f"""## Topic Exploration: {data.get('topic', 'Topic')}
-
-### Potential Angles
-1. **Human Interest** - Personal stories and sacrifices
-2. **Technical Achievement** - Engineering challenges overcome
-3. **Historical Context** - Political and social factors
-4. **Legacy** - Long-term impact and relevance today
-
-### Key Themes
-- Courage in the face of uncertainty
-- Collaboration and teamwork
-- Innovation under pressure
-- The cost of progress
-
-### Story Threads to Explore
-- Untold stories from behind the scenes
-- International perspective
-- What-if scenarios
-- Modern parallels
-
-*This is a mock AI response for testing purposes.*"""})
+    return jsonify(create_doc('shots', data)), 201
 
 
-# Document serving routes
-@app.route("/api/document/<path:blob_path>")
-def get_document(blob_path):
-    """Serve a mock document (inline)."""
-    if blob_path in MOCK_DOCUMENTS:
-        return Response(
-            MOCK_DOCUMENTS[blob_path],
-            mimetype='text/html',
-            headers={'Content-Disposition': f'inline; filename="{blob_path.split("/")[-1]}"'}
-        )
-    return jsonify({"error": "Document not found"}), 404
+@app.route("/api/shots/<shot_id>", methods=["PUT"])
+def update_shot(shot_id):
+    data = request.get_json()
+    return jsonify(update_doc('shots', shot_id, data))
 
 
-@app.route("/api/download/<path:blob_path>")
-def download_document(blob_path):
-    """Download a mock document (attachment)."""
-    if blob_path in MOCK_DOCUMENTS:
-        filename = blob_path.split("/")[-1]
-        return Response(
-            MOCK_DOCUMENTS[blob_path],
-            mimetype='text/html',
-            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
-        )
-    return jsonify({"error": "Document not found"}), 404
+@app.route("/api/shots/<shot_id>", methods=["DELETE"])
+def delete_shot(shot_id):
+    delete_doc('shots', shot_id)
+    return jsonify({"success": True})
 
 
-@app.route("/api/projects/<project_id>/source-documents", methods=["GET"])
-def get_source_documents(project_id):
-    """Get source documents for a project."""
-    docs = [a for a in storage['assets'] if a.get('projectId') == project_id and a.get('isSourceDocument')]
-    return jsonify(docs)
+# Scripts
+@app.route("/api/projects/<project_id>/scripts", methods=["GET"])
+def get_scripts(project_id):
+    return jsonify(get_all_docs('scripts', project_id))
 
 
-@app.route("/api/projects/<project_id>/assets/clear-sources", methods=["DELETE"])
-def clear_source_documents(project_id):
-    """Delete all source documents for a project."""
-    source_docs = [a for a in storage['assets'] if a.get('projectId') == project_id and a.get('isSourceDocument')]
-    deleted_count = len(source_docs)
-
-    # Remove from storage
-    storage['assets'] = [a for a in storage['assets'] if not (a.get('projectId') == project_id and a.get('isSourceDocument'))]
-
-    # Clean up mock documents
-    for doc in source_docs:
-        if doc.get('gcsPath') and doc['gcsPath'] in MOCK_DOCUMENTS:
-            del MOCK_DOCUMENTS[doc['gcsPath']]
-
-    return jsonify({"success": True, "deleted": deleted_count})
+@app.route("/api/scripts", methods=["POST"])
+def create_script():
+    data = request.get_json()
+    return jsonify(create_doc('scripts', data)), 201
 
 
-@app.route("/api/projects/<project_id>/assets/download-all", methods=["GET"])
-def download_all_source_documents(project_id):
-    """Download all source documents as a ZIP file."""
-    import zipfile
-    import io
-
-    source_docs = [a for a in storage['assets'] if a.get('projectId') == project_id and a.get('isSourceDocument')]
-
-    # Create ZIP in memory
-    zip_buffer = io.BytesIO()
-
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        for doc in source_docs:
-            gcs_path = doc.get('gcsPath')
-            if gcs_path and gcs_path in MOCK_DOCUMENTS:
-                filename = doc.get('filename') or gcs_path.split('/')[-1]
-                zip_file.writestr(filename, MOCK_DOCUMENTS[gcs_path])
-
-    zip_buffer.seek(0)
-
-    return Response(
-        zip_buffer.getvalue(),
-        mimetype='application/zip',
-        headers={'Content-Disposition': f'attachment; filename="source-documents-{project_id[:8]}.zip"'}
-    )
+@app.route("/api/scripts/<script_id>", methods=["PUT"])
+def update_script(script_id):
+    data = request.get_json()
+    return jsonify(update_doc('scripts', script_id, data))
 
 
-# ============== Asset Upload Endpoint ==============
+@app.route("/api/scripts/<script_id>", methods=["DELETE"])
+def delete_script(script_id):
+    delete_doc('scripts', script_id)
+    return jsonify({"success": True})
+
+
+# Assets
+@app.route("/api/projects/<project_id>/assets", methods=["GET"])
+def get_assets(project_id):
+    return jsonify(get_all_docs('assets', project_id))
+
+
+@app.route("/api/assets", methods=["POST"])
+def create_asset():
+    data = request.get_json()
+    return jsonify(create_doc('assets', data)), 201
+
+
+@app.route("/api/assets/<asset_id>", methods=["PUT"])
+def update_asset(asset_id):
+    data = request.get_json()
+    return jsonify(update_doc('assets', asset_id, data))
+
+
+@app.route("/api/assets/<asset_id>", methods=["DELETE"])
+def delete_asset(asset_id):
+    # Delete file from GCS if it exists
+    asset = get_doc('assets', asset_id)
+    if asset and asset.get('gcsPath'):
+        try:
+            bucket = storage_client.bucket(STORAGE_BUCKET)
+            blob = bucket.blob(asset['gcsPath'])
+            blob.delete()
+        except Exception as e:
+            print(f"Error deleting blob: {e}")
+    delete_doc('assets', asset_id)
+    return jsonify({"success": True})
+
+
+# ============== Asset Upload ==============
 
 @app.route("/api/assets/upload", methods=["POST"])
 def upload_asset():
@@ -535,17 +450,19 @@ def upload_asset():
     content_type = file.content_type or 'application/octet-stream'
     original_filename = file.filename
 
-    # Generate mock GCS path
+    # Upload to GCS
     file_hash = hashlib.md5(file_content).hexdigest()[:8]
     blob_path = f"assets/{project_id}/{file_hash}_{original_filename}"
 
-    # Store mock content
-    MOCK_DOCUMENTS[blob_path] = file_content
+    try:
+        bucket = storage_client.bucket(STORAGE_BUCKET)
+        blob = bucket.blob(blob_path)
+        blob.upload_from_string(file_content, content_type=content_type)
+    except Exception as e:
+        return jsonify({"error": f"Failed to upload file: {str(e)}"}), 500
 
-    # Create asset
-    asset_id = str(uuid.uuid4())
+    # Create asset document
     asset_data = {
-        "id": asset_id,
         "projectId": project_id,
         "title": title,
         "type": asset_type,
@@ -557,8 +474,6 @@ def upload_asset():
         "sizeBytes": file_size,
         "hasFile": True,
         "isResearchDocument": is_research_document,
-        "createdAt": datetime.utcnow().isoformat(),
-        "updatedAt": datetime.utcnow().isoformat()
     }
 
     # Add optional entity associations
@@ -567,11 +482,11 @@ def upload_asset():
     if series_id:
         asset_data["seriesId"] = series_id
 
-    storage['assets'].append(asset_data)
+    asset = create_doc('assets', asset_data)
 
     return jsonify({
         "success": True,
-        "asset": asset_data,
+        "asset": asset,
         "gcsPath": blob_path,
         "filename": original_filename,
         "size": file_size
@@ -581,23 +496,28 @@ def upload_asset():
 @app.route("/api/assets/<asset_id>/file", methods=["GET"])
 def get_asset_file(asset_id):
     """Download an asset's file."""
-    asset = next((a for a in storage['assets'] if a['id'] == asset_id), None)
+    asset = get_doc('assets', asset_id)
     if not asset:
         return jsonify({"error": "Asset not found"}), 404
 
     gcs_path = asset.get('gcsPath')
-    if not gcs_path or gcs_path not in MOCK_DOCUMENTS:
+    if not gcs_path:
         return jsonify({"error": "File not found"}), 404
 
-    content = MOCK_DOCUMENTS[gcs_path]
-    content_type = asset.get('mimeType', 'application/octet-stream')
-    filename = asset.get('filename', 'download')
+    try:
+        bucket = storage_client.bucket(STORAGE_BUCKET)
+        blob = bucket.blob(gcs_path)
+        content = blob.download_as_bytes()
+        content_type = asset.get('mimeType', 'application/octet-stream')
+        filename = asset.get('filename', 'download')
 
-    return Response(
-        content,
-        mimetype=content_type,
-        headers={'Content-Disposition': f'attachment; filename="{filename}"'}
-    )
+        return Response(
+            content,
+            mimetype=content_type,
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+        )
+    except Exception as e:
+        return jsonify({"error": f"Failed to download file: {str(e)}"}), 500
 
 
 # ============== Research Documents Query Endpoints ==============
@@ -605,39 +525,85 @@ def get_asset_file(asset_id):
 @app.route("/api/episodes/<episode_id>/research-documents", methods=["GET"])
 def get_episode_research_documents(episode_id):
     """Get research documents for an episode."""
-    docs = [a for a in storage['assets']
-            if a.get('episodeId') == episode_id and a.get('isResearchDocument')]
-    return jsonify(docs)
+    docs = db.collection(COLLECTIONS['assets']).where('episodeId', '==', episode_id).where('isResearchDocument', '==', True).stream()
+    return jsonify([doc_to_dict(doc) for doc in docs])
 
 
 @app.route("/api/series/<series_id>/research-documents", methods=["GET"])
 def get_series_research_documents(series_id):
     """Get research documents for a series."""
-    docs = [a for a in storage['assets']
-            if a.get('seriesId') == series_id and a.get('isResearchDocument')]
-    return jsonify(docs)
+    docs = db.collection(COLLECTIONS['assets']).where('seriesId', '==', series_id).where('isResearchDocument', '==', True).stream()
+    return jsonify([doc_to_dict(doc) for doc in docs])
 
 
 @app.route("/api/projects/<project_id>/research-documents", methods=["GET"])
 def get_project_research_documents(project_id):
     """Get project-level research documents (not associated with episode/series)."""
-    docs = [a for a in storage['assets']
-            if a.get('projectId') == project_id
-            and a.get('isResearchDocument')
-            and not a.get('episodeId')
-            and not a.get('seriesId')]
-    return jsonify(docs)
+    # Get all research docs for project, then filter in Python
+    docs = db.collection(COLLECTIONS['assets']).where('projectId', '==', project_id).where('isResearchDocument', '==', True).stream()
+    result = []
+    for doc in docs:
+        data = doc_to_dict(doc)
+        if not data.get('episodeId') and not data.get('seriesId'):
+            result.append(data)
+    return jsonify(result)
 
 
 @app.route("/api/projects/<project_id>/all-research-documents", methods=["GET"])
 def get_all_research_documents(project_id):
     """Get all research documents for a project."""
-    docs = [a for a in storage['assets']
-            if a.get('projectId') == project_id and a.get('isResearchDocument')]
-    return jsonify(docs)
+    docs = db.collection(COLLECTIONS['assets']).where('projectId', '==', project_id).where('isResearchDocument', '==', True).stream()
+    return jsonify([doc_to_dict(doc) for doc in docs])
 
 
-# ============== AI Generate Topics Endpoint ==============
+# ============== Source Documents ==============
+
+@app.route("/api/projects/<project_id>/source-documents", methods=["GET"])
+def get_source_documents(project_id):
+    """Get source documents for a project."""
+    docs = db.collection(COLLECTIONS['assets']).where('projectId', '==', project_id).where('isSourceDocument', '==', True).stream()
+    return jsonify([doc_to_dict(doc) for doc in docs])
+
+
+@app.route("/api/document/<path:blob_path>")
+def get_document(blob_path):
+    """Serve a document (inline)."""
+    try:
+        bucket = storage_client.bucket(STORAGE_BUCKET)
+        blob = bucket.blob(blob_path)
+        content = blob.download_as_bytes()
+        content_type = blob.content_type or 'application/pdf'
+        filename = blob_path.split("/")[-1]
+
+        return Response(
+            content,
+            mimetype=content_type,
+            headers={'Content-Disposition': f'inline; filename="{filename}"'}
+        )
+    except Exception as e:
+        return jsonify({"error": f"Document not found: {str(e)}"}), 404
+
+
+@app.route("/api/download/<path:blob_path>")
+def download_document(blob_path):
+    """Download a document (attachment)."""
+    try:
+        bucket = storage_client.bucket(STORAGE_BUCKET)
+        blob = bucket.blob(blob_path)
+        content = blob.download_as_bytes()
+        content_type = blob.content_type or 'application/pdf'
+        filename = blob_path.split("/")[-1]
+
+        return Response(
+            content,
+            mimetype=content_type,
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+        )
+    except Exception as e:
+        return jsonify({"error": f"Document not found: {str(e)}"}), 404
+
+
+# ============== AI Endpoints ==============
 
 @app.route("/api/ai/generate-topics", methods=["POST"])
 def ai_generate_topics():
@@ -647,50 +613,170 @@ def ai_generate_topics():
     description = data.get('description', '')
     num_topics = data.get('numTopics', 5)
 
-    # Generate mock topics based on the title
-    mock_topics = [
-        {
-            "title": f"Episode 1: Origins of {title}",
-            "description": f"Exploring the early beginnings and foundational moments that shaped {title}.",
-            "order": 1
-        },
-        {
-            "title": f"Episode 2: Key Figures",
-            "description": f"Profiles of the important people who played crucial roles in the story of {title}.",
-            "order": 2
-        },
-        {
-            "title": f"Episode 3: Turning Points",
-            "description": f"Critical moments and decisions that changed the trajectory of {title}.",
-            "order": 3
-        },
-        {
-            "title": f"Episode 4: Challenges & Triumphs",
-            "description": f"The obstacles faced and victories achieved in the journey of {title}.",
-            "order": 4
-        },
-        {
-            "title": f"Episode 5: Legacy & Impact",
-            "description": f"How {title} continues to influence and shape our world today.",
-            "order": 5
-        },
-        {
-            "title": f"Episode 6: Behind the Scenes",
-            "description": f"Untold stories and lesser-known aspects of {title}.",
-            "order": 6
-        },
-        {
-            "title": f"Episode 7: The Future",
-            "description": f"What lies ahead for {title} and its continued relevance.",
-            "order": 7
-        }
-    ]
+    prompt = f"""Generate {num_topics} episode ideas for a documentary titled "{title}".
 
-    # Return the requested number of topics
-    return jsonify({"topics": mock_topics[:num_topics]})
+Description: {description}
+
+For each episode, provide:
+1. A compelling title
+2. A brief description (2-3 sentences)
+
+Format your response as a JSON array with objects containing "title", "description", and "order" fields.
+Only output the JSON array, no other text."""
+
+    try:
+        response = model.generate_content(prompt)
+        response_text = response.text.strip()
+
+        # Try to parse JSON from response
+        import json
+        # Remove markdown code blocks if present
+        if response_text.startswith('```'):
+            response_text = response_text.split('\n', 1)[1]
+            if response_text.endswith('```'):
+                response_text = response_text.rsplit('\n', 1)[0]
+
+        topics = json.loads(response_text)
+        return jsonify({"topics": topics[:num_topics]})
+    except Exception as e:
+        # Fallback to generic topics
+        topics = [
+            {"title": f"Episode {i+1}: {title} - Part {i+1}", "description": f"Exploring aspect {i+1} of {title}.", "order": i+1}
+            for i in range(num_topics)
+        ]
+        return jsonify({"topics": topics})
 
 
-# ============== Simple Research Endpoint ==============
+@app.route("/api/ai/research", methods=["POST"])
+def ai_research():
+    """AI-powered research with source downloading."""
+    data = request.get_json()
+    query = data.get('query', '')
+    project_id = data.get('projectId', '')
+    download_sources = data.get('downloadSources', True)
+
+    system_prompt = """You are a research assistant for documentary filmmakers.
+    Provide well-sourced, factual information with clear citations.
+    Include URLs to primary sources when possible.
+    Format your response with clear sections and bullet points."""
+
+    result = generate_ai_response(query, system_prompt)
+    response_data = {"result": result, "sources": []}
+
+    if download_sources and project_id:
+        urls = extract_urls(result)
+        if urls:
+            research_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S") + "_" + hashlib.md5(query.encode()).hexdigest()[:8]
+            response_data["researchId"] = research_id
+
+            for url in urls[:3]:  # Limit to 3 sources
+                source_data = download_and_store(url, STORAGE_BUCKET, project_id, research_id)
+                if source_data:
+                    # Create asset for source document
+                    asset_data = {
+                        "projectId": project_id,
+                        "researchId": research_id,
+                        "title": source_data['title'],
+                        "type": "Document",
+                        "source": url,
+                        "gcsPath": source_data['gcsPath'],
+                        "status": "Acquired",
+                        "isSourceDocument": True,
+                        "sizeBytes": source_data['size'],
+                        "filename": source_data['filename']
+                    }
+                    create_doc('assets', asset_data)
+                    response_data["sources"].append({
+                        "url": url,
+                        "status": "success",
+                        "title": source_data['title'],
+                        "gcsPath": source_data['gcsPath']
+                    })
+
+    return jsonify(response_data)
+
+
+@app.route("/api/ai/interview-questions", methods=["POST"])
+def ai_interview():
+    """Generate interview questions."""
+    data = request.get_json()
+    subject = data.get('subject', 'Subject')
+    role = data.get('role', '')
+    context = data.get('context', '')
+
+    prompt = f"""Generate thoughtful interview questions for {subject}, who is a {role}.
+
+Context: {context}
+
+Provide 8-10 open-ended questions that will elicit compelling storytelling responses.
+Include follow-up prompts where appropriate."""
+
+    result = generate_ai_response(prompt)
+    return jsonify({"result": result})
+
+
+@app.route("/api/ai/script-outline", methods=["POST"])
+def ai_script():
+    """Generate script outline."""
+    data = request.get_json()
+    title = data.get('title', 'Episode')
+    duration = data.get('duration', '45 minutes')
+    content = data.get('content', '')
+
+    prompt = f"""Create a detailed script outline for a documentary episode titled "{title}".
+
+Target duration: {duration}
+Content/Notes: {content}
+
+Include:
+- Three-act structure with timestamps
+- Key narrative beats
+- Suggested interview segments
+- B-roll and visual suggestions"""
+
+    result = generate_ai_response(prompt)
+    return jsonify({"result": result})
+
+
+@app.route("/api/ai/shot-ideas", methods=["POST"])
+def ai_shots():
+    """Generate shot ideas."""
+    data = request.get_json()
+    scene = data.get('scene', '')
+    location = data.get('location', '')
+
+    prompt = f"""Suggest cinematic shot ideas for a documentary scene.
+
+Scene: {scene}
+Location: {location}
+
+Include:
+- Shot type (wide, close-up, etc.)
+- Camera movement suggestions
+- Equipment recommendations
+- Lighting considerations"""
+
+    result = generate_ai_response(prompt)
+    return jsonify({"result": result})
+
+
+@app.route("/api/ai/expand-topic", methods=["POST"])
+def ai_expand():
+    """Expand on a topic."""
+    data = request.get_json()
+    topic = data.get('topic', '')
+
+    prompt = f"""Provide a comprehensive exploration of this documentary topic: {topic}
+
+Include:
+- Multiple angles and perspectives
+- Key themes to explore
+- Potential story threads
+- Related subtopics"""
+
+    result = generate_ai_response(prompt)
+    return jsonify({"result": result})
+
 
 @app.route("/api/ai/simple-research", methods=["POST"])
 def ai_simple_research():
@@ -699,31 +785,20 @@ def ai_simple_research():
     title = data.get('title', '')
     description = data.get('description', '')
     episode_id = data.get('episodeId', '')
-    project_id = data.get('projectId', '')
     save_research = data.get('save', True)
 
-    result = f"""## Research: {title}
+    prompt = f"""Research the following documentary topic:
 
-### Background
-{description}
+Title: {title}
+Description: {description}
 
-### Key Facts
-- **Fact 1:** Important historical context about this topic
-- **Fact 2:** Relevant statistics and data points
-- **Fact 3:** Expert opinions and perspectives
+Provide:
+- Key facts and background information
+- Relevant sources and references
+- Interview suggestions
+- Visual/archive material recommendations"""
 
-### Sources
-- [Wikipedia - {title}](https://en.wikipedia.org/wiki/Example)
-- [Academic Journal](https://example.com/journal)
-- [News Archive](https://example.com/news)
-
-### Interview Suggestions
-- Subject matter experts in the field
-- Eyewitnesses or participants
-- Historians and researchers
-
-*This is a mock AI response for testing purposes.*"""
-
+    result = generate_ai_response(prompt)
     response_data = {
         "result": result,
         "title": title,
@@ -731,14 +806,12 @@ def ai_simple_research():
     }
 
     if save_research and episode_id:
-        # Update episode with research
-        for ep in storage['episodes']:
-            if ep['id'] == episode_id:
-                ep['research'] = result
-                ep['researchGeneratedAt'] = datetime.utcnow().isoformat()
-                response_data['saved'] = True
-                response_data['episodeId'] = episode_id
-                break
+        update_doc('episodes', episode_id, {
+            'research': result,
+            'researchGeneratedAt': datetime.now(timezone.utc).isoformat()
+        })
+        response_data['saved'] = True
+        response_data['episodeId'] = episode_id
 
     return jsonify(response_data)
 
@@ -746,7 +819,7 @@ def ai_simple_research():
 @app.route("/api/episodes/<episode_id>/research", methods=["GET"])
 def get_episode_research(episode_id):
     """Get saved research for an episode."""
-    episode = next((ep for ep in storage['episodes'] if ep['id'] == episode_id), None)
+    episode = get_doc('episodes', episode_id)
     if not episode:
         return jsonify({"error": "Episode not found"}), 404
 
@@ -764,36 +837,35 @@ def save_episode_research(episode_id):
     data = request.get_json()
     research = data.get('research', '')
 
-    for ep in storage['episodes']:
-        if ep['id'] == episode_id:
-            ep['research'] = research
-            ep['researchGeneratedAt'] = datetime.utcnow().isoformat()
-            return jsonify({
-                "success": True,
-                "episodeId": episode_id,
-                "linksExtracted": 0,
-                "assetsCreated": 0
-            })
+    update_doc('episodes', episode_id, {
+        'research': research,
+        'researchGeneratedAt': datetime.now(timezone.utc).isoformat()
+    })
 
-    return jsonify({"error": "Episode not found"}), 404
+    return jsonify({
+        "success": True,
+        "episodeId": episode_id,
+        "linksExtracted": 0,
+        "assetsCreated": 0
+    })
 
 
 @app.route("/api/episodes/<episode_id>/research", methods=["DELETE"])
 def delete_episode_research(episode_id):
     """Delete saved research for an episode."""
-    for ep in storage['episodes']:
-        if ep['id'] == episode_id:
-            ep['research'] = ''
-            ep['researchGeneratedAt'] = ''
-            return jsonify({"success": True})
-
-    return jsonify({"error": "Episode not found"}), 404
+    update_doc('episodes', episode_id, {
+        'research': '',
+        'researchGeneratedAt': ''
+    })
+    return jsonify({"success": True})
 
 
 if __name__ == "__main__":
     print("\n" + "=" * 50)
-    print("  Documentary Production App - LOCAL TEST MODE")
-    print("  AI responses are mocked (no GCP required)")
+    print("  Documentary Production App - LOCAL MODE")
+    print("  Using REAL GCP services (Firestore, GCS, Vertex AI)")
+    print(f"  Project: {PROJECT_ID}")
+    print(f"  Bucket: {STORAGE_BUCKET}")
     print("=" * 50)
     print("\n  Open: http://localhost:5000\n")
 
