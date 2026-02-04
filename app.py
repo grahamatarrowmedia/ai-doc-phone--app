@@ -745,6 +745,9 @@ def submit_feedback():
     feedback_doc = {
         'text': feedback_text,
         'type': feedback_type,
+        'name': data.get('name', 'Anonymous'),
+        'version': data.get('version', ''),
+        'url': data.get('url', ''),
         'screenshotPath': screenshot_path,
         'projectId': project_id,
         'projectTitle': project_title,
@@ -752,7 +755,9 @@ def submit_feedback():
         'userAgent': user_agent,
         'screenSize': screen_size,
         'status': 'new',
-        'createdAt': timestamp
+        'response': '',
+        'createdAt': timestamp,
+        'updatedAt': timestamp
     }
 
     # Save to Firestore
@@ -764,9 +769,10 @@ def submit_feedback():
 
     return jsonify({
         "success": True,
+        "id": doc_ref.id,
         "feedbackId": doc_ref.id,
         "message": "Feedback received"
-    })
+    }), 201
 
 
 @app.route("/api/feedback", methods=["GET"])
@@ -783,6 +789,27 @@ def get_all_feedback():
         feedback_list.append(fb)
 
     return jsonify(feedback_list)
+
+
+@app.route("/api/feedback/<feedback_id>", methods=["PUT"])
+def update_feedback_status(feedback_id):
+    """Update a feedback entry (status and admin response)."""
+    try:
+        data = request.get_json()
+        update_data = {
+            "updatedAt": datetime.utcnow().isoformat()
+        }
+        if 'status' in data:
+            update_data['status'] = data['status']
+        if 'response' in data:
+            update_data['response'] = data['response']
+
+        doc_ref = db.collection(COLLECTIONS['feedback']).document(feedback_id)
+        doc_ref.update(update_data)
+        return jsonify({"success": True})
+    except Exception as e:
+        print(f"[ERROR] Failed to update feedback: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/projects/<project_id>/blueprint-content", methods=["GET"])
@@ -1336,74 +1363,6 @@ def download_pending_assets(project_id):
 
     except Exception as e:
         print(f"[ERROR] Failed to download pending assets: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-# ============== Feedback Routes ==============
-
-@app.route("/api/feedback", methods=["GET"])
-def get_feedback():
-    """Get all feedback entries."""
-    try:
-        docs_ref = db.collection(COLLECTIONS['feedback']).order_by(
-            'createdAt', direction=firestore.Query.DESCENDING
-        ).limit(50)
-        feedback = []
-        for doc in docs_ref.stream():
-            data = doc.to_dict()
-            data['id'] = doc.id
-            feedback.append(data)
-        return jsonify(feedback)
-    except Exception as e:
-        print(f"[ERROR] Failed to get feedback: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/feedback", methods=["POST"])
-def create_feedback():
-    """Create a new feedback entry."""
-    try:
-        data = request.get_json()
-        feedback_data = {
-            "type": data.get('type', 'other'),
-            "text": data.get('text', ''),
-            "name": data.get('name', 'Anonymous'),
-            "version": data.get('version', ''),
-            "userAgent": data.get('userAgent', ''),
-            "url": data.get('url', ''),
-            "status": "new",
-            "response": "",
-            "createdAt": datetime.utcnow().isoformat(),
-            "updatedAt": datetime.utcnow().isoformat()
-        }
-        doc_ref = db.collection(COLLECTIONS['feedback']).document()
-        doc_ref.set(feedback_data)
-        feedback_data['id'] = doc_ref.id
-        print(f"[DEBUG] Feedback created: {feedback_data['type']} from {feedback_data['name']}")
-        return jsonify(feedback_data), 201
-    except Exception as e:
-        print(f"[ERROR] Failed to create feedback: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/feedback/<feedback_id>", methods=["PUT"])
-def update_feedback(feedback_id):
-    """Update a feedback entry (for admin responses)."""
-    try:
-        data = request.get_json()
-        update_data = {
-            "updatedAt": datetime.utcnow().isoformat()
-        }
-        if 'status' in data:
-            update_data['status'] = data['status']
-        if 'response' in data:
-            update_data['response'] = data['response']
-
-        doc_ref = db.collection(COLLECTIONS['feedback']).document(feedback_id)
-        doc_ref.update(update_data)
-        return jsonify({"success": True})
-    except Exception as e:
-        print(f"[ERROR] Failed to update feedback: {e}")
         return jsonify({"error": str(e)}), 500
 
 
