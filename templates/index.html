@@ -1749,6 +1749,12 @@
                     const statusBadge = a.status === 'Identified' ? 'badge-green'
                         : a.status === 'Acquired' ? 'badge-blue'
                         : 'badge-orange';
+                    const fileIcon = a.mimeType ? (
+                        a.mimeType.startsWith('video/') ? '🎬' :
+                        a.mimeType.startsWith('audio/') ? '🎵' :
+                        a.mimeType.startsWith('image/') ? '🖼️' :
+                        a.mimeType.includes('pdf') ? '📄' : '📁'
+                    ) : '📁';
                     return `
                     <div class="card">
                         <div class="item-header">
@@ -1758,10 +1764,14 @@
                                     <span class="badge badge-gray">${a.type}</span>
                                     <span class="badge ${statusBadge}">${a.status}</span>
                                 </div>
+                                ${a.hasFile ? `
+                                    <p class="text-sm text-success">${fileIcon} ${a.filename || 'file'} (${formatBytes(a.sizeBytes || 0)})</p>
+                                ` : ''}
                                 ${a.source ? `<p class="text-sm"><a href="${a.source}" target="_blank" class="text-link">🔗 ${truncateUrl(a.source)}</a></p>` : ''}
                                 ${a.notes && !a.isResearchLink ? `<p class="text-sm mt-2 text-muted">${a.notes}</p>` : ''}
                             </div>
                             <div class="item-actions">
+                                ${a.hasFile ? `<a href="/api/assets/${a.id}/file" class="btn-icon" title="Download file">⬇️</a>` : ''}
                                 <button class="btn-icon" onclick="showEditModal('asset', '${a.id}')">✏️</button>
                                 <button class="btn-icon" onclick="deleteItem('assets', '${a.id}')">🗑️</button>
                             </div>
@@ -2476,7 +2486,7 @@
                     </form>
                 `,
                 asset: `
-                    <form onsubmit="saveItem(event, 'assets')">
+                    <form onsubmit="saveAsset(event)" enctype="multipart/form-data">
                         <input type="hidden" name="projectId" value="${state.selectedProject}">
                         <input type="text" name="title" placeholder="Asset title" required>
                         <select name="type">
@@ -2487,7 +2497,11 @@
                             <option value="Reference">Reference</option>
                             <option value="Other">Other</option>
                         </select>
-                        <input type="text" name="source" placeholder="Source URL">
+                        <div class="form-group">
+                            <label class="text-sm text-muted">Upload File (optional)</label>
+                            <input type="file" name="file" class="file-input" onchange="updateAssetTitle(this)">
+                        </div>
+                        <input type="text" name="source" placeholder="Source URL (for references)">
                         <select name="status">
                             <option value="Identified">Identified</option>
                             <option value="Needed">Needed</option>
@@ -2580,6 +2594,75 @@
                 await loadProjectData();
             } catch (error) {
                 alert('Error saving: ' + error.message);
+            }
+        }
+
+        function updateAssetTitle(fileInput) {
+            // Auto-fill title from filename if title is empty
+            const form = fileInput.closest('form');
+            const titleInput = form.querySelector('input[name="title"]');
+            if (titleInput && !titleInput.value && fileInput.files.length > 0) {
+                const filename = fileInput.files[0].name;
+                // Remove extension for title
+                titleInput.value = filename.replace(/\.[^/.]+$/, '');
+            }
+        }
+
+        async function saveAsset(event) {
+            event.preventDefault();
+            const form = event.target;
+            const fileInput = form.querySelector('input[type="file"]');
+            const hasFile = fileInput && fileInput.files.length > 0;
+
+            const submitBtn = form.querySelector('button[type="submit"]');
+            const originalText = submitBtn.innerHTML;
+
+            try {
+                const editId = form.dataset.editId;
+                const editType = form.dataset.editType;
+
+                if (hasFile) {
+                    // Use FormData for file upload
+                    submitBtn.innerHTML = '<span class="spinner-small"></span> Uploading...';
+                    submitBtn.disabled = true;
+
+                    const formData = new FormData(form);
+                    if (editId) {
+                        formData.append('assetId', editId);
+                    }
+
+                    const response = await fetch('/api/assets/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.error || 'Upload failed');
+                    }
+
+                    const result = await response.json();
+                    console.log('Asset uploaded:', result);
+                } else {
+                    // No file - use regular JSON API
+                    const formData = new FormData(form);
+                    const data = Object.fromEntries(formData.entries());
+                    delete data.file; // Remove empty file field
+
+                    if (editId && editType) {
+                        await api(`/api/${editType}/${editId}`, 'PUT', data);
+                    } else {
+                        await api('/api/assets', 'POST', data);
+                    }
+                }
+
+                closeModal();
+                await loadProjectData();
+            } catch (error) {
+                alert('Error saving asset: ' + error.message);
+            } finally {
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
             }
         }
 

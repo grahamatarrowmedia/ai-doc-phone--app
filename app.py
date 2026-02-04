@@ -559,6 +559,128 @@ def delete_asset(asset_id):
     return jsonify({"success": True})
 
 
+@app.route("/api/assets/upload", methods=["POST"])
+def upload_asset_file():
+    """Upload a file for an asset and create/update the asset record."""
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No file selected"}), 400
+
+    # Get form data
+    project_id = request.form.get('projectId')
+    asset_id = request.form.get('assetId')  # Optional - for updating existing asset
+    title = request.form.get('title', file.filename)
+    asset_type = request.form.get('type', 'Document')
+    status = request.form.get('status', 'Acquired')
+    notes = request.form.get('notes', '')
+
+    if not project_id:
+        return jsonify({"error": "Project ID is required"}), 400
+
+    try:
+        # Read file content
+        file_content = file.read()
+        file_size = len(file_content)
+
+        # Determine content type
+        content_type = file.content_type or 'application/octet-stream'
+
+        # Generate safe filename
+        original_filename = file.filename
+        safe_filename = re.sub(r'[^\w\-.]', '_', original_filename)
+
+        # Generate unique path
+        file_hash = hashlib.md5(file_content).hexdigest()[:8]
+        blob_path = f"assets/{project_id}/{file_hash}_{safe_filename}"
+
+        # Upload to GCS
+        ensure_bucket_exists(STORAGE_BUCKET)
+        bucket = storage_client.bucket(STORAGE_BUCKET)
+        blob = bucket.blob(blob_path)
+        blob.upload_from_string(file_content, content_type=content_type)
+
+        print(f"Uploaded asset file: {blob_path} ({file_size} bytes)")
+
+        # Create or update asset document
+        asset_data = {
+            "projectId": project_id,
+            "title": title,
+            "type": asset_type,
+            "status": status,
+            "notes": notes,
+            "gcsPath": blob_path,
+            "filename": original_filename,
+            "mimeType": content_type,
+            "sizeBytes": file_size,
+            "hasFile": True,
+            "updatedAt": datetime.utcnow().isoformat()
+        }
+
+        if asset_id:
+            # Update existing asset
+            # First delete old file if exists
+            existing = get_doc('assets', asset_id)
+            if existing and existing.get('gcsPath') and existing['gcsPath'] != blob_path:
+                try:
+                    old_blob = bucket.blob(existing['gcsPath'])
+                    if old_blob.exists():
+                        old_blob.delete()
+                except:
+                    pass
+
+            asset = update_doc('assets', asset_id, asset_data)
+        else:
+            # Create new asset
+            asset_data['createdAt'] = datetime.utcnow().isoformat()
+            asset = create_doc('assets', asset_data)
+
+        return jsonify({
+            "success": True,
+            "asset": asset,
+            "gcsPath": blob_path,
+            "filename": original_filename,
+            "size": file_size
+        }), 201
+
+    except Exception as e:
+        print(f"Error uploading asset file: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/assets/<asset_id>/file", methods=["GET"])
+def get_asset_file(asset_id):
+    """Download an asset's file."""
+    asset = get_doc('assets', asset_id)
+    if not asset:
+        return jsonify({"error": "Asset not found"}), 404
+
+    if not asset.get('gcsPath'):
+        return jsonify({"error": "Asset has no file"}), 404
+
+    try:
+        bucket = storage_client.bucket(STORAGE_BUCKET)
+        blob = bucket.blob(asset['gcsPath'])
+
+        if not blob.exists():
+            return jsonify({"error": "File not found in storage"}), 404
+
+        content = blob.download_as_bytes()
+        content_type = asset.get('mimeType', 'application/octet-stream')
+        filename = asset.get('filename', 'download')
+
+        return Response(
+            content,
+            mimetype=content_type,
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+        )
+    except Exception as e:
+        print(f"Error downloading asset file: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/projects/<project_id>/assets/clear-sources", methods=["DELETE"])
 def clear_source_documents(project_id):
     """Delete all source documents for a project."""
