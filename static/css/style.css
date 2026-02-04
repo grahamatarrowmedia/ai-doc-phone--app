@@ -259,6 +259,74 @@ body {
     transition: width 0.3s ease;
 }
 
+/* Feedback Page */
+.version-badge.clickable {
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.version-badge.clickable:hover {
+    background: var(--primary);
+    color: white;
+}
+.modal-large {
+    max-width: 700px;
+}
+.feedback-container {
+    padding: 16px;
+}
+.feedback-form textarea {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--gray-300);
+    border-radius: 6px;
+    font-family: inherit;
+    resize: vertical;
+}
+.feedback-form select,
+.feedback-form input[type="text"] {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--gray-300);
+    border-radius: 6px;
+    font-family: inherit;
+}
+.feedback-item {
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+    background: var(--gray-50);
+}
+.feedback-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-weight: 500;
+    text-transform: capitalize;
+}
+.feedback-item-text {
+    margin: 8px 0;
+    line-height: 1.5;
+}
+.feedback-item-meta {
+    display: flex;
+    gap: 16px;
+    font-size: 0.75rem;
+    color: var(--gray-500);
+}
+.feedback-response {
+    margin-top: 12px;
+    padding: 10px;
+    background: var(--gray-100);
+    border-radius: 6px;
+    font-size: 0.875rem;
+}
+.feedback-history {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
 /* Episode List */
 .episode-list {
     margin-top: 0.5rem;

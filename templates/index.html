@@ -57,7 +57,7 @@
                 <div class="header-top">
                     <h1>📽️ Documentary Production</h1>
                     <div class="header-actions">
-                        <span class="version-badge" title="App version">v{{ app_version }}</span>
+                        <span class="version-badge clickable" title="Click for feedback" onclick="showFeedbackPage()">v{{ app_version }}</span>
                         <button class="header-btn" onclick="toggleTheme()" id="theme-btn" title="Toggle dark/light mode">🌙</button>
                         <button class="header-btn" onclick="showProjectsModal()">📁 Projects</button>
                     </div>
@@ -97,6 +97,50 @@
                 <button onclick="closeAIModal()" class="close-btn">&times;</button>
             </div>
             <div id="ai-modal-content"></div>
+        </div>
+    </div>
+
+    <!-- Feedback Modal -->
+    <div id="feedback-modal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3>📝 Feedback</h3>
+                <button onclick="closeFeedbackModal()" class="close-btn">&times;</button>
+            </div>
+            <div id="feedback-modal-content">
+                <div class="feedback-container">
+                    <!-- Submit Feedback Form -->
+                    <div class="feedback-form card">
+                        <h4>Submit Feedback</h4>
+                        <div class="form-group">
+                            <label>Type</label>
+                            <select id="feedback-type">
+                                <option value="bug">🐛 Bug Report</option>
+                                <option value="feature">💡 Feature Request</option>
+                                <option value="improvement">✨ Improvement</option>
+                                <option value="other">💬 Other</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Your Feedback</label>
+                            <textarea id="feedback-text" rows="4" placeholder="Describe your feedback..."></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Your Name (optional)</label>
+                            <input type="text" id="feedback-name" placeholder="Anonymous">
+                        </div>
+                        <button class="btn btn-primary" onclick="submitFeedback()">Submit Feedback</button>
+                    </div>
+
+                    <!-- Feedback History -->
+                    <div class="feedback-history card mt-4">
+                        <h4>Feedback History</h4>
+                        <div id="feedback-list">
+                            <p class="text-muted">Loading feedback...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -2755,6 +2799,92 @@
 
         function closeAIModal() {
             document.getElementById('ai-modal').classList.remove('active');
+        }
+
+        // ============== Feedback Functions ==============
+
+        async function showFeedbackPage() {
+            const modal = document.getElementById('feedback-modal');
+            modal.classList.add('active');
+            await loadFeedbackHistory();
+        }
+
+        function closeFeedbackModal() {
+            document.getElementById('feedback-modal').classList.remove('active');
+        }
+
+        async function submitFeedback() {
+            const type = document.getElementById('feedback-type').value;
+            const text = document.getElementById('feedback-text').value.trim();
+            const name = document.getElementById('feedback-name').value.trim() || 'Anonymous';
+
+            if (!text) {
+                alert('Please enter your feedback');
+                return;
+            }
+
+            try {
+                const response = await api('/api/feedback', 'POST', {
+                    type: type,
+                    text: text,
+                    name: name,
+                    version: '{{ app_version }}',
+                    userAgent: navigator.userAgent,
+                    url: window.location.href
+                });
+
+                alert('Thank you for your feedback!');
+                document.getElementById('feedback-text').value = '';
+                document.getElementById('feedback-name').value = '';
+                await loadFeedbackHistory();
+
+            } catch (error) {
+                console.error('Error submitting feedback:', error);
+                alert('Failed to submit feedback: ' + error.message);
+            }
+        }
+
+        async function loadFeedbackHistory() {
+            const container = document.getElementById('feedback-list');
+            try {
+                const feedback = await api('/api/feedback', 'GET');
+
+                if (!feedback || feedback.length === 0) {
+                    container.innerHTML = '<p class="text-muted">No feedback yet</p>';
+                    return;
+                }
+
+                container.innerHTML = feedback.map(f => {
+                    const typeIcon = f.type === 'bug' ? '🐛'
+                        : f.type === 'feature' ? '💡'
+                        : f.type === 'improvement' ? '✨'
+                        : '💬';
+                    const date = new Date(f.createdAt).toLocaleString();
+                    const statusBadge = f.status === 'resolved' ? '<span class="badge badge-green">Resolved</span>'
+                        : f.status === 'in-progress' ? '<span class="badge badge-blue">In Progress</span>'
+                        : '<span class="badge badge-gray">New</span>';
+
+                    return \`
+                        <div class="feedback-item">
+                            <div class="feedback-item-header">
+                                <span>\${typeIcon} \${f.type}</span>
+                                \${statusBadge}
+                            </div>
+                            <p class="feedback-item-text">\${f.text}</p>
+                            <div class="feedback-item-meta">
+                                <span>\${f.name}</span>
+                                <span>v\${f.version || 'unknown'}</span>
+                                <span>\${date}</span>
+                            </div>
+                            \${f.response ? \`<div class="feedback-response"><strong>Response:</strong> \${f.response}</div>\` : ''}
+                        </div>
+                    \`;
+                }).join('');
+
+            } catch (error) {
+                console.error('Error loading feedback:', error);
+                container.innerHTML = '<p class="text-error">Failed to load feedback</p>';
+            }
         }
 
         async function runAI(type) {
