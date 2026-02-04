@@ -2122,6 +2122,108 @@ input[type="file"]::file-selector-button:hover {
     justify-content: flex-end;
 }
 
+/* Series Section Styles */
+.series-section {
+    margin-bottom: 1.5rem;
+    background: var(--card-bg);
+    border-radius: 0.75rem;
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+}
+
+.series-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    background: linear-gradient(135deg, var(--gray-50) 0%, var(--gray-100) 100%);
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.series-header:hover {
+    background: var(--gray-100);
+}
+
+.series-header-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex: 1;
+}
+
+.series-header-info h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0;
+    color: var(--text-primary);
+}
+
+.series-header-info .series-description {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+.series-header-info .episode-count {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.series-header-actions {
+    display: flex;
+    gap: 0.25rem;
+    flex-shrink: 0;
+}
+
+.series-collapse-icon {
+    font-size: 0.875rem;
+    transition: transform 0.2s;
+    margin-right: 0.5rem;
+}
+
+.series-section.collapsed .series-collapse-icon {
+    transform: rotate(-90deg);
+}
+
+.series-episodes {
+    padding: 0.5rem;
+}
+
+.series-section.collapsed .series-episodes {
+    display: none;
+}
+
+.series-episodes .card {
+    margin-bottom: 0.5rem;
+}
+
+.series-episodes .card:last-child {
+    margin-bottom: 0;
+}
+
+/* Ungrouped section styling */
+.ungrouped-section {
+    margin-bottom: 1.5rem;
+}
+
+.ungrouped-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+    margin-bottom: 0.5rem;
+    border-bottom: 1px dashed var(--border-color);
+}
+
+.ungrouped-header h3 {
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin: 0;
+}
+
 /* Responsive */
 @media (min-width: 768px) {
     .container {

@@ -45,6 +45,7 @@ storage_client = storage.Client()
 COLLECTIONS = {
     'projects': 'doc_projects',
     'episodes': 'doc_episodes',
+    'series': 'doc_series',
     'research': 'doc_research',
     'interviews': 'doc_interviews',
     'shots': 'doc_shots',
@@ -378,7 +379,7 @@ def update_project(project_id):
 def delete_project(project_id):
     """Delete a project and all related data."""
     # Delete all related data first
-    for collection in ['episodes', 'research', 'interviews', 'shots', 'assets', 'scripts']:
+    for collection in ['episodes', 'series', 'research', 'interviews', 'shots', 'assets', 'scripts']:
         docs = db.collection(COLLECTIONS[collection]).where('projectId', '==', project_id).stream()
         for doc in docs:
             doc.reference.delete()
@@ -417,6 +418,45 @@ def update_episode(episode_id):
 def delete_episode(episode_id):
     """Delete an episode."""
     delete_doc('episodes', episode_id)
+    return jsonify({"success": True})
+
+
+# ============== Series Routes ==============
+
+@app.route("/api/projects/<project_id>/series", methods=["GET"])
+def get_series(project_id):
+    """Get all series for a project."""
+    series = get_all_docs('series', project_id)
+    # Sort by order field
+    series.sort(key=lambda s: s.get('order', 0))
+    return jsonify(series)
+
+
+@app.route("/api/series", methods=["POST"])
+def create_series():
+    """Create a new series."""
+    data = request.get_json()
+    series = create_doc('series', data)
+    return jsonify(series), 201
+
+
+@app.route("/api/series/<series_id>", methods=["PUT"])
+def update_series(series_id):
+    """Update a series."""
+    data = request.get_json()
+    series = update_doc('series', series_id, data)
+    return jsonify(series)
+
+
+@app.route("/api/series/<series_id>", methods=["DELETE"])
+def delete_series(series_id):
+    """Delete a series and ungroup its episodes."""
+    # Remove seriesId from all episodes in this series
+    episodes = db.collection(COLLECTIONS['episodes']).where('seriesId', '==', series_id).stream()
+    for ep in episodes:
+        ep.reference.update({'seriesId': None, 'updatedAt': datetime.utcnow().isoformat()})
+
+    delete_doc('series', series_id)
     return jsonify({"success": True})
 
 

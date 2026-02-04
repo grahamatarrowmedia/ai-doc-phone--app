@@ -225,6 +225,7 @@
             selectedProject: null,
             project: null,
             episodes: [],
+            series: [],
             research: [],
             interviews: [],
             shots: [],
@@ -288,8 +289,9 @@
                 document.getElementById('project-name').textContent = state.project.title + ' ▼';
 
                 // Load all related data
-                const [episodes, research, interviews, shots, assets, scripts] = await Promise.all([
+                const [episodes, series, research, interviews, shots, assets, scripts] = await Promise.all([
                     api(`/api/projects/${state.selectedProject}/episodes`),
+                    api(`/api/projects/${state.selectedProject}/series`),
                     api(`/api/projects/${state.selectedProject}/research`),
                     api(`/api/projects/${state.selectedProject}/interviews`),
                     api(`/api/projects/${state.selectedProject}/shots`),
@@ -298,6 +300,7 @@
                 ]);
 
                 state.episodes = episodes || [];
+                state.series = series || [];
                 state.research = research || [];
                 state.interviews = interviews || [];
                 state.shots = shots || [];
@@ -1086,6 +1089,55 @@
             }
         }
 
+        function renderEpisodeCard(ep) {
+            const episodeResearch = state.research.filter(r => r.episodeId === ep.id);
+            const hasResearch = episodeResearch.length > 0;
+            return `
+                <div class="card episode-card">
+                    <div class="item-header">
+                        <div class="flex-1">
+                            <h3>${ep.title}</h3>
+                            <p>${ep.description}</p>
+                            <div class="flex gap-2 mt-2">
+                                <span class="text-sm text-muted">${ep.duration || ''}</span>
+                                <span class="badge badge-gray">${ep.status}</span>
+                                ${hasResearch ? `<span class="badge badge-green">📚 ${episodeResearch.length} research</span>` : ''}
+                            </div>
+                        </div>
+                        <div class="item-actions">
+                            <button class="btn-icon" onclick="showEditModal('episode', '${ep.id}')">✏️</button>
+                            <button class="btn-icon" onclick="deleteItem('episodes', '${ep.id}')">🗑️</button>
+                        </div>
+                    </div>
+
+                    <!-- Episode Research Section -->
+                    <div class="episode-research-section">
+                        <div class="episode-research-header">
+                            <span class="text-sm font-bold">Research</span>
+                            <div class="flex gap-2">
+                                ${ep.research ? `
+                                    <button class="btn-sm btn-secondary" onclick="viewSavedResearch('${ep.id}', '${ep.title.replace(/'/g, "\\'")}')">
+                                        📖 View Saved
+                                    </button>
+                                ` : ''}
+                                <button class="ai-button-sm" onclick="doSimpleResearch('${ep.id}', '${ep.title.replace(/'/g, "\\'")}', '${(ep.description || '').replace(/'/g, "\\'")}')">
+                                    🔍 ${ep.research ? 'Regenerate' : 'Research'}
+                                </button>
+                            </div>
+                        </div>
+                        ${ep.research ? `
+                            <div class="saved-research-indicator" onclick="viewSavedResearch('${ep.id}', '${ep.title.replace(/'/g, "\\'")}')">
+                                <span class="badge badge-green">✓ Research saved</span>
+                                <span class="text-xs text-muted">${ep.researchGeneratedAt ? 'Generated: ' + new Date(ep.researchGeneratedAt).toLocaleDateString() : ''}</span>
+                            </div>
+                        ` : `
+                            <p class="text-sm text-muted">No research saved. Click Research to generate.</p>
+                        `}
+                    </div>
+                </div>
+            `;
+        }
+
         function renderEpisodes() {
             // Count episodes with research
             const episodesWithResearch = state.episodes.filter(ep =>
@@ -1093,11 +1145,19 @@
             ).length;
             const episodesWithoutResearch = state.episodes.length - episodesWithResearch;
 
+            // Group episodes by series
+            const ungroupedEpisodes = state.episodes.filter(ep => !ep.seriesId);
+            const seriesWithEpisodes = state.series.map(series => ({
+                ...series,
+                episodes: state.episodes.filter(ep => ep.seriesId === series.id)
+            }));
+
             return `
                 <div class="section-header">
                     <h2>Episodes</h2>
                     <div class="flex gap-2">
-                        <button class="btn btn-primary" onclick="showAddModal('episode')">+ Add</button>
+                        <button class="btn btn-secondary" onclick="showAddModal('series')">+ Series</button>
+                        <button class="btn btn-primary" onclick="showAddModal('episode')">+ Episode</button>
                     </div>
                 </div>
                 ${episodesWithoutResearch > 0 && state.episodes.length > 1 ? `
@@ -1105,55 +1165,76 @@
                         <span>${episodesWithoutResearch} episode${episodesWithoutResearch > 1 ? 's' : ''} without research</span>
                     </div>
                 ` : ''}
-                ${state.episodes.map(ep => {
-                    const episodeResearch = state.research.filter(r => r.episodeId === ep.id);
-                    const hasResearch = episodeResearch.length > 0;
-                    return `
-                        <div class="card episode-card">
-                            <div class="item-header">
-                                <div class="flex-1">
-                                    <h3>${ep.title}</h3>
-                                    <p>${ep.description}</p>
-                                    <div class="flex gap-2 mt-2">
-                                        <span class="text-sm text-muted">${ep.duration || ''}</span>
-                                        <span class="badge badge-gray">${ep.status}</span>
-                                        ${hasResearch ? `<span class="badge badge-green">📚 ${episodeResearch.length} research</span>` : ''}
-                                    </div>
-                                </div>
-                                <div class="item-actions">
-                                    <button class="btn-icon" onclick="showEditModal('episode', '${ep.id}')">✏️</button>
-                                    <button class="btn-icon" onclick="deleteItem('episodes', '${ep.id}')">🗑️</button>
-                                </div>
-                            </div>
 
-                            <!-- Episode Research Section -->
-                            <div class="episode-research-section">
-                                <div class="episode-research-header">
-                                    <span class="text-sm font-bold">Research</span>
-                                    <div class="flex gap-2">
-                                        ${ep.research ? `
-                                            <button class="btn-sm btn-secondary" onclick="viewSavedResearch('${ep.id}', '${ep.title.replace(/'/g, "\\'")}')">
-                                                📖 View Saved
-                                            </button>
-                                        ` : ''}
-                                        <button class="ai-button-sm" onclick="doSimpleResearch('${ep.id}', '${ep.title.replace(/'/g, "\\'")}', '${(ep.description || '').replace(/'/g, "\\'")}')">
-                                            🔍 ${ep.research ? 'Regenerate' : 'Research'}
-                                        </button>
-                                    </div>
+                ${seriesWithEpisodes.map(series => `
+                    <div class="series-section" id="series-${series.id}">
+                        <div class="series-header" onclick="toggleSeriesCollapse('${series.id}')">
+                            <div class="series-header-info">
+                                <span class="series-collapse-icon">▼</span>
+                                <div>
+                                    <h3>${series.name}</h3>
+                                    ${series.description ? `<p class="series-description">${series.description}</p>` : ''}
                                 </div>
-                                ${ep.research ? `
-                                    <div class="saved-research-indicator" onclick="viewSavedResearch('${ep.id}', '${ep.title.replace(/'/g, "\\'")}')">
-                                        <span class="badge badge-green">✓ Research saved</span>
-                                        <span class="text-xs text-muted">${ep.researchGeneratedAt ? 'Generated: ' + new Date(ep.researchGeneratedAt).toLocaleDateString() : ''}</span>
-                                    </div>
-                                ` : `
-                                    <p class="text-sm text-muted">No research saved. Click Research to generate.</p>
-                                `}
+                                <span class="episode-count badge badge-gray">${series.episodes.length} episode${series.episodes.length !== 1 ? 's' : ''}</span>
+                            </div>
+                            <div class="series-header-actions" onclick="event.stopPropagation()">
+                                <button class="btn-icon" onclick="showEditModal('series', '${series.id}')" title="Edit series">✏️</button>
+                                <button class="btn-icon" onclick="deleteSeries('${series.id}')" title="Delete series">🗑️</button>
                             </div>
                         </div>
-                    `;
-                }).join('')}
+                        <div class="series-episodes">
+                            ${series.episodes.length > 0
+                                ? series.episodes.map(ep => renderEpisodeCard(ep)).join('')
+                                : '<p class="text-sm text-muted" style="padding: 1rem;">No episodes in this series yet.</p>'
+                            }
+                        </div>
+                    </div>
+                `).join('')}
+
+                ${ungroupedEpisodes.length > 0 ? `
+                    <div class="ungrouped-section">
+                        <div class="ungrouped-header">
+                            <h3>📁 Ungrouped Episodes</h3>
+                            <span class="badge badge-gray">${ungroupedEpisodes.length}</span>
+                        </div>
+                        ${ungroupedEpisodes.map(ep => renderEpisodeCard(ep)).join('')}
+                    </div>
+                ` : ''}
+
+                ${state.episodes.length === 0 ? `
+                    <div class="placeholder-message">
+                        <div class="placeholder-icon">📝</div>
+                        <h3>No Episodes Yet</h3>
+                        <p>Add your first episode or create a series to organize them.</p>
+                    </div>
+                ` : ''}
             `;
+        }
+
+        function toggleSeriesCollapse(seriesId) {
+            const section = document.getElementById('series-' + seriesId);
+            if (section) {
+                section.classList.toggle('collapsed');
+            }
+        }
+
+        async function deleteSeries(seriesId) {
+            const series = state.series.find(s => s.id === seriesId);
+            const episodesInSeries = state.episodes.filter(ep => ep.seriesId === seriesId);
+
+            let confirmMsg = `Delete series "${series?.name || 'this series'}"?`;
+            if (episodesInSeries.length > 0) {
+                confirmMsg += `\n\n${episodesInSeries.length} episode(s) will be moved to "Ungrouped".`;
+            }
+
+            if (!confirm(confirmMsg)) return;
+
+            try {
+                await api(`/api/series/${seriesId}`, 'DELETE');
+                await loadProjectData();
+            } catch (error) {
+                alert('Error deleting series: ' + error.message);
+            }
         }
 
         function toggleResearchExpand(element) {
@@ -2408,13 +2489,37 @@
         }
 
         function showAddModal(type) {
+            // Build series options for episode form
+            const seriesOptions = state.series.map(s =>
+                `<option value="${s.id}">${s.name}</option>`
+            ).join('');
+
             const forms = {
+                series: `
+                    <form onsubmit="saveItem(event, 'series')">
+                        <input type="hidden" name="projectId" value="${state.selectedProject}">
+                        <input type="text" name="name" placeholder="Series name (e.g., Season 1, The Origins)" required>
+                        <textarea name="description" placeholder="Description (optional)" rows="2"></textarea>
+                        <input type="number" name="order" placeholder="Order (1, 2, 3...)" min="0" value="${state.series.length + 1}">
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                            <button type="submit" class="btn btn-primary">Save</button>
+                        </div>
+                    </form>
+                `,
                 episode: `
                     <form onsubmit="saveItem(event, 'episodes')">
                         <input type="hidden" name="projectId" value="${state.selectedProject}">
                         <input type="text" name="title" placeholder="Episode title" required>
                         <textarea name="description" placeholder="Description" rows="3"></textarea>
                         <input type="text" name="duration" placeholder="Duration (e.g., 45 min)">
+                        <div class="form-group">
+                            <label class="text-sm text-muted">Series (optional)</label>
+                            <select name="seriesId">
+                                <option value="">-- No Series (Ungrouped) --</option>
+                                ${seriesOptions}
+                            </select>
+                        </div>
                         <select name="status">
                             <option value="Planning">Planning</option>
                             <option value="Research">Research</option>
@@ -2530,6 +2635,7 @@
             };
 
             const titles = {
+                series: 'Add Series',
                 episode: 'Add Episode',
                 research: 'Add Research',
                 interview: 'Add Interview',
@@ -2543,6 +2649,7 @@
 
         function showEditModal(type, id) {
             const collectionMap = {
+                series: 'series',
                 episode: 'episodes',
                 research: 'research',
                 interview: 'interviews',

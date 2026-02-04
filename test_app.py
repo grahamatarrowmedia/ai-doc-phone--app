@@ -14,6 +14,7 @@ app = Flask(__name__)
 storage = {
     'projects': [],
     'episodes': [],
+    'series': [],
     'research': [],
     'interviews': [],
     'shots': [],
@@ -40,11 +41,19 @@ def init_sample_data():
         'createdAt': datetime.utcnow().isoformat()
     }]
 
+    # Create series
+    series1_id = str(uuid.uuid4())
+    series2_id = str(uuid.uuid4())
+    storage['series'] = [
+        {'id': series1_id, 'projectId': project_id, 'name': 'The Beginning', 'description': 'Origins of the space race', 'order': 1, 'createdAt': datetime.utcnow().isoformat()},
+        {'id': series2_id, 'projectId': project_id, 'name': 'The Mission', 'description': 'The Apollo 11 mission itself', 'order': 2, 'createdAt': datetime.utcnow().isoformat()}
+    ]
+
     storage['episodes'] = [
-        {'id': str(uuid.uuid4()), 'projectId': project_id, 'title': 'Episode 1: The Race Begins', 'description': 'Cold War context and the space race', 'status': 'Research', 'duration': '45 min'},
-        {'id': str(uuid.uuid4()), 'projectId': project_id, 'title': 'Episode 2: Preparation', 'description': 'Training and technical development', 'status': 'Planning', 'duration': '45 min'},
-        {'id': str(uuid.uuid4()), 'projectId': project_id, 'title': 'Episode 3: Launch', 'description': 'The Saturn V launch and journey to the moon', 'status': 'Planning', 'duration': '45 min'},
-        {'id': str(uuid.uuid4()), 'projectId': project_id, 'title': 'Episode 4: One Small Step', 'description': 'The lunar landing and moonwalk', 'status': 'Planning', 'duration': '45 min'}
+        {'id': str(uuid.uuid4()), 'projectId': project_id, 'seriesId': series1_id, 'title': 'Episode 1: The Race Begins', 'description': 'Cold War context and the space race', 'status': 'Research', 'duration': '45 min'},
+        {'id': str(uuid.uuid4()), 'projectId': project_id, 'seriesId': series1_id, 'title': 'Episode 2: Preparation', 'description': 'Training and technical development', 'status': 'Planning', 'duration': '45 min'},
+        {'id': str(uuid.uuid4()), 'projectId': project_id, 'seriesId': series2_id, 'title': 'Episode 3: Launch', 'description': 'The Saturn V launch and journey to the moon', 'status': 'Planning', 'duration': '45 min'},
+        {'id': str(uuid.uuid4()), 'projectId': project_id, 'seriesId': series2_id, 'title': 'Episode 4: One Small Step', 'description': 'The lunar landing and moonwalk', 'status': 'Planning', 'duration': '45 min'}
     ]
 
     storage['research'] = [
@@ -123,7 +132,7 @@ def update_project(project_id):
 def delete_project(project_id):
     storage['projects'] = [p for p in storage['projects'] if p['id'] != project_id]
     # Also delete related data
-    for collection in ['episodes', 'research', 'interviews', 'shots', 'assets', 'scripts']:
+    for collection in ['episodes', 'series', 'research', 'interviews', 'shots', 'assets', 'scripts']:
         storage[collection] = [item for item in storage[collection] if item.get('projectId') != project_id]
     return jsonify({"success": True})
 
@@ -165,8 +174,21 @@ def get_collection_routes(collection_name):
 
 
 # Register routes for all collections
-for collection in ['episodes', 'research', 'interviews', 'shots', 'assets', 'scripts']:
+for collection in ['episodes', 'series', 'research', 'interviews', 'shots', 'assets', 'scripts']:
     get_collection_routes(collection)
+
+
+# Series delete needs special handling to ungroup episodes
+@app.route("/api/series/<series_id>", methods=["DELETE"], endpoint="delete_series_with_ungroup")
+def delete_series_with_ungroup(series_id):
+    """Delete a series and ungroup its episodes."""
+    # Remove seriesId from all episodes in this series
+    for ep in storage['episodes']:
+        if ep.get('seriesId') == series_id:
+            ep['seriesId'] = None
+
+    storage['series'] = [s for s in storage['series'] if s['id'] != series_id]
+    return jsonify({"success": True})
 
 
 # Override the assets delete to handle mock document cleanup
