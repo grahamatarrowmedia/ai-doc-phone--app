@@ -163,6 +163,7 @@ def get_collection_routes(collection_name):
         for i, item in enumerate(storage[collection_name]):
             if item['id'] == item_id:
                 storage[collection_name][i].update(data)
+                storage[collection_name][i]['updatedAt'] = datetime.utcnow().isoformat()
                 return jsonify(storage[collection_name][i])
         return jsonify({"error": "Not found"}), 404
     app.add_url_rule(f"/api/{collection_name}/<item_id>", f"update_{collection_name}", update_item, methods=["PUT"])
@@ -170,7 +171,9 @@ def get_collection_routes(collection_name):
     def delete_item(item_id):
         storage[collection_name] = [i for i in storage[collection_name] if i['id'] != item_id]
         return jsonify({"success": True})
-    app.add_url_rule(f"/api/{collection_name}/<item_id>", f"delete_{collection_name}", delete_item, methods=["DELETE"])
+    # Skip generic delete for series and assets - they have custom handlers below
+    if collection_name not in ['series', 'assets']:
+        app.add_url_rule(f"/api/{collection_name}/<item_id>", f"delete_{collection_name}", delete_item, methods=["DELETE"])
 
 
 # Register routes for all collections
