@@ -119,10 +119,15 @@ The Research phase gathers and verifies all factual information needed for the e
 1. Click **"Episodes"** in the sidebar
 2. Select your episode to open the Episode Workspace
 3. Click the **"Research"** tab
-4. Click **"+ Add Document"**
-5. Select document type: **"Uploaded"**
-6. Upload your episode brief document
-7. Click **"Save"**
+4. Click **"📁 Upload File"**
+5. Select your episode brief document (PDF, DOC, TXT, etc.)
+6. Set the **Title** (defaults to filename)
+7. Set **Document Type** to "Uploaded Document"
+8. Set **Confidence Level** (typically "Requires Confirmation" for new uploads)
+9. Add any **Notes** about the document
+10. Click **"📁 Upload Research Document"**
+
+The upload progress will display, and your document will appear in the Research tab with a file icon.
 
 ### Step 2: Run AI Research Agent
 
@@ -148,25 +153,39 @@ Each research document has a **confidence level**:
 | 🟡 **Probable** | Likely accurate, needs confirmation | Verify before script |
 | 🔴 **Requires Confirmation** | Unverified, needs interview/research | Must verify |
 
-To update a document's confidence level:
-1. Click on the document card
-2. Select the new confidence level from the dropdown
-3. Add any verification notes
-4. Click **"Update"**
+To view and update a document:
+1. Click on the document card to open the detail view
+2. Review the content and any attached files
+3. Click **"Download"** to download attached files
+4. Use the quick buttons at the bottom:
+   - **"✓ Mark Verified"** - Mark as verified
+   - **"? Needs Confirmation"** - Flag for verification
 
 ### Step 4: Add Additional Research
 
-To manually add research documents:
+**To upload files (PDFs, documents, images, etc.):**
 
-1. Click **"+ Add Document"**
-2. Select the document type:
-   - **Uploaded**: Your own research files
-   - **Agent Output**: AI-generated content
-   - **Fact Check**: Verification sources
-   - **NotebookLM**: Source of truth document
-3. Enter the document details
-4. Set the confidence level
-5. Click **"Save"**
+1. Click **"📁 Upload File"**
+2. Select your file (supported: PDF, DOC, DOCX, TXT, RTF, MD, images, audio, video)
+3. Enter a **Title** for the document
+4. Select the **Document Type**:
+   - **Uploaded Document**: Your own research files
+   - **Fact Check Source**: Verification sources
+   - **NotebookLM Export**: Source of truth document
+5. Set the **Confidence Level**
+6. Add any **Notes** about the document
+7. Optionally add a **Source URL**
+8. Click **"📁 Upload Research Document"**
+
+**To add text-based notes:**
+
+1. Click **"+ Add Note"**
+2. Enter the note **Title**
+3. Select the **Document Type**
+4. Set the **Confidence Level**
+5. Enter the **Content** (notes, key points, etc.)
+6. Optionally add a **Source URL**
+7. Click **"Add Document"**
 
 ### Step 5: Submit for Review
 
