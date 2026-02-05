@@ -179,20 +179,26 @@ When your research package is complete:
    - Character profiles for key people
    - Archive requirements list
    - Interview question bank
-3. Click **"Submit for Review"** or update the phase status to **"Review"**
+3. Click on the **Research** phase in the workflow progress bar
+4. Select **"Ready for Review"** from the status dropdown
+5. Add any notes for the producer
+6. Click **"Update Phase Status"**
 
 ### Step 6: Producer Approval
 
 The series producer reviews the research package (48-hour review gate):
 
-1. Producer receives notification of pending review
+1. Producer reviews all research documents
 2. Producer can:
    - Request additional research on specific areas
-   - Upload supplementary documents
-   - Add notes for the next phase
-3. When satisfied, producer clicks **"Approve"**
+   - Upload supplementary documents via **"+ Add Document"**
+   - Add notes when updating phase status
+3. When satisfied, producer clicks on the **Research** phase in the workflow bar
+4. Selects **"Approved"** from the status dropdown
+5. Adds any notes for the archive team
+6. Clicks **"Update Phase Status"**
 
-**Approval triggers Phase 2 (Archive) to begin.**
+**Approval automatically advances the episode to Phase 2 (Archive).**
 
 ---
 
@@ -292,11 +298,12 @@ To add archive footage not from Quickture:
    - Check against research archive requirements
    - Ensure key moments have coverage
    - Flag any missing footage
-2. Update phase status to **"Review"**
-3. Producer reviews archive coverage
-4. Producer clicks **"Approve"**
+2. Click on the **Archive** phase in the workflow progress bar
+3. Select **"Ready for Review"** and click **"Update Phase Status"**
+4. Producer reviews archive coverage
+5. Producer clicks on **Archive** phase, selects **"Approved"**
 
-**Approval triggers Phase 3 (Script) to begin.**
+**Approval automatically advances the episode to Phase 3 (Script).**
 
 ---
 
@@ -556,16 +563,21 @@ Complete the following:
 
 To manually update a phase status:
 
-1. Open the Episode Workspace
-2. Click on the phase in the workflow progress bar
-3. Select new status:
+1. Open the Episode Workspace by clicking on an episode
+2. Click on any phase icon in the workflow progress bar (top of workspace)
+3. A modal appears with status options:
    - **Pending**: Not yet started
    - **In Progress**: Currently being worked on
-   - **Review**: Submitted for producer review
-   - **Approved**: Producer has approved
-   - **Rejected**: Needs revision
-4. Add any notes for the team
-5. Click **"Update"**
+   - **Ready for Review**: Submitted for producer review
+   - **Approved**: Producer has approved (advances to next phase)
+   - **Rejected (Needs Revision)**: Requires changes
+4. Add any notes for the team in the notes field
+5. Click **"Update Phase Status"**
+
+When a phase is marked as **Approved**, the system automatically:
+- Marks the current phase as complete with a timestamp
+- Advances the episode to the next phase
+- Sets the next phase status to **In Progress**
 
 ### Workflow Progress Bar
 
@@ -609,9 +621,14 @@ The system automatically tracks compliance for:
 
 To manually add a compliance item:
 
-1. Click **"+ Add Item"**
-2. Select type (Source Citation, Archive License, etc.)
-3. Enter details:
+1. In the Episode Workspace, click the **"Compliance"** tab
+2. Click **"+ Add Item"** button (next to Export Package)
+3. Select the item type from the dropdown:
+   - **Source Citation**: For factual claims
+   - **Archive License**: For footage usage
+   - **EXIF Metadata**: For AI-generated content
+   - **Legal Signoff**: For sensitive content
+4. Enter details:
 
    **For Source Citations:**
    - Claim text
@@ -672,14 +689,6 @@ For Fremantle legal/compliance sign-off:
 - **Work in parallel** - While one episode is in Script review, start Research on the next
 - **Monitor bottlenecks** - The dashboard shows episodes waiting on human review
 - **Export compliance early** - Don't wait until the end; verify as you go
-
-### Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl + S` | Save current work |
-| `Ctrl + Enter` | Submit for review |
-| `Esc` | Close modal/panel |
 
 ---
 

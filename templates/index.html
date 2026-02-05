@@ -1247,7 +1247,8 @@
                                 const isCompleted = phaseData.status === 'approved';
                                 const isReview = phaseData.status === 'review';
                                 return `
-                                    <div class="flex-1 text-center ${isCurrent ? 'opacity-100' : 'opacity-50'}">
+                                    <div onclick="showPhaseUpdateModal('${key}')"
+                                        class="flex-1 text-center cursor-pointer hover:bg-[#1a1a1a] rounded-lg p-2 transition ${isCurrent ? 'opacity-100' : 'opacity-50'}">
                                         <div class="text-xl mb-1 ${isCompleted ? 'text-green-400' : isReview ? 'text-yellow-400' : ''}">${phase.icon}</div>
                                         <div class="text-xs ${isCurrent ? 'text-white font-bold' : 'text-gray-500'}">${phase.name}</div>
                                         ${isCompleted ? '<div class="text-[10px] text-green-400">✓</div>' : ''}
@@ -1257,6 +1258,7 @@
                                 `;
                             }).join('')}
                         </div>
+                        <p class="text-center text-[10px] text-gray-600 mt-2">Click a phase to update its status</p>
                     </div>
 
                     <!-- Tabs -->
@@ -1492,9 +1494,14 @@
                 <div class="space-y-4">
                     <div class="flex justify-between items-center">
                         <h3 class="text-lg font-bold text-white">Compliance Package</h3>
-                        <button onclick="exportCompliancePackage()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition text-sm">
-                            📄 Export Package
-                        </button>
+                        <div class="flex gap-2">
+                            <button onclick="showAddComplianceItem()" class="bg-[#1a1a1a] border border-[#333] hover:border-red-600 text-white px-4 py-2 rounded-lg transition text-sm">
+                                + Add Item
+                            </button>
+                            <button onclick="exportCompliancePackage()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition text-sm">
+                                📄 Export Package
+                            </button>
+                        </div>
                     </div>
 
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -2081,6 +2088,182 @@ clip001.mov,00:00:00,00:00:30,Apollo launch sequence,rocket;launch;nasa,4K scan,
                     documentType: document.getElementById('research-doc-type').value,
                     confidenceLevel: document.getElementById('research-doc-confidence').value,
                     sourceUrl: document.getElementById('research-doc-url').value || null
+                });
+
+                await loadEpisodeWorkspace(state.selectedEpisode);
+                closeModal();
+                render();
+            } catch (error) {
+                showModal('Error', `<p class="text-red-400">${error.message}</p>`);
+            }
+        }
+
+        // =============================================================================
+        // SCRIPT VERSION FUNCTIONS
+        // =============================================================================
+        async function lockScript(versionId) {
+            if (!versionId) return;
+
+            try {
+                await api(`/api/script-versions/${versionId}/lock`, 'POST');
+                await loadEpisodeWorkspace(state.selectedEpisode);
+                showModal('Script Locked', `
+                    <div class="text-center py-4">
+                        <div class="text-4xl mb-4">🔒</div>
+                        <p class="text-white font-bold">Script locked as V4 Final</p>
+                        <p class="text-sm text-gray-500 mt-2">Ready for voiceover generation</p>
+                    </div>
+                `);
+                setTimeout(() => { closeModal(); render(); }, 2000);
+            } catch (error) {
+                showModal('Error', `<p class="text-red-400">${error.message}</p>`);
+            }
+        }
+
+        function viewScriptVersion(versionId) {
+            const version = state.episodeWorkspace?.scriptVersions?.find(v => v.id === versionId);
+            if (!version) return;
+
+            showModal(`Script ${version.versionType || 'Version ' + version.versionNumber}`, `
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs px-2 py-1 rounded ${
+                            version.isLocked ? 'bg-green-500/20 text-green-400' : 'bg-gray-500/20 text-gray-400'
+                        }">${version.isLocked ? '🔒 Locked' : 'Draft'}</span>
+                        <span class="text-xs text-gray-500">${version.createdAt ? new Date(version.createdAt).toLocaleDateString() : ''}</span>
+                    </div>
+                    <div class="bg-[#0a0a0a] rounded-lg p-4 max-h-96 overflow-y-auto">
+                        <div class="markdown-content prose prose-invert">
+                            ${marked.parse(version.content || 'No content')}
+                        </div>
+                    </div>
+                    ${!version.isLocked ? `
+                        <button onclick="lockScript('${versionId}'); closeModal();"
+                            class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition">
+                            🔒 Lock as Final Version
+                        </button>
+                    ` : ''}
+                </div>
+            `);
+        }
+
+        // =============================================================================
+        // WORKFLOW PHASE FUNCTIONS
+        // =============================================================================
+        async function updatePhaseStatus(phase, status, notes = '') {
+            if (!state.selectedEpisode) return;
+
+            try {
+                await api(`/api/episodes/${state.selectedEpisode}/workflow/phase`, 'PUT', {
+                    phase: phase,
+                    status: status,
+                    notes: notes
+                });
+                await loadEpisodeWorkspace(state.selectedEpisode);
+                render();
+            } catch (error) {
+                showModal('Error', `<p class="text-red-400">${error.message}</p>`);
+            }
+        }
+
+        function showPhaseUpdateModal(phase) {
+            const phaseInfo = WORKFLOW_PHASES[phase];
+            if (!phaseInfo) return;
+
+            showModal(`Update ${phaseInfo.name} Phase`, `
+                <form onsubmit="submitPhaseUpdate(event, '${phase}')">
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Status</label>
+                            <select id="phase-status"
+                                class="w-full bg-[#0a0a0a] border border-[#333] rounded-lg p-3 text-white focus:outline-none focus:border-[#1a73e8] transition">
+                                <option value="pending">Pending</option>
+                                <option value="in_progress">In Progress</option>
+                                <option value="review">Ready for Review</option>
+                                <option value="approved">Approved</option>
+                                <option value="rejected">Rejected (Needs Revision)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Notes (optional)</label>
+                            <textarea id="phase-notes" rows="3"
+                                class="w-full bg-[#0a0a0a] border border-[#333] rounded-lg p-3 text-white focus:outline-none focus:border-[#1a73e8] transition"
+                                placeholder="Add notes for the team..."></textarea>
+                        </div>
+                        <button type="submit" class="w-full bg-[#1a73e8] hover:bg-[#1557b0] text-white font-bold py-3 rounded-lg transition">
+                            Update Phase Status
+                        </button>
+                    </div>
+                </form>
+            `);
+        }
+
+        async function submitPhaseUpdate(event, phase) {
+            event.preventDefault();
+            const status = document.getElementById('phase-status').value;
+            const notes = document.getElementById('phase-notes').value;
+            await updatePhaseStatus(phase, status, notes);
+            closeModal();
+        }
+
+        // =============================================================================
+        // COMPLIANCE FUNCTIONS
+        // =============================================================================
+        function showAddComplianceItem() {
+            if (!state.selectedEpisode) return;
+
+            showModal('Add Compliance Item', `
+                <form onsubmit="createComplianceItem(event)">
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Item Type</label>
+                            <select id="compliance-type"
+                                class="w-full bg-[#0a0a0a] border border-[#333] rounded-lg p-3 text-white focus:outline-none focus:border-red-600 transition">
+                                <option value="source_citation">Source Citation</option>
+                                <option value="archive_license">Archive License</option>
+                                <option value="exif_metadata">EXIF Metadata</option>
+                                <option value="legal_signoff">Legal Signoff</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Title/Claim</label>
+                            <input type="text" id="compliance-title" required
+                                class="w-full bg-[#0a0a0a] border border-[#333] rounded-lg p-3 text-white focus:outline-none focus:border-red-600 transition"
+                                placeholder="e.g., Apollo 13 explosion date">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Source/Details</label>
+                            <textarea id="compliance-content" rows="3" required
+                                class="w-full bg-[#0a0a0a] border border-[#333] rounded-lg p-3 text-white focus:outline-none focus:border-red-600 transition"
+                                placeholder="Source document, URL, or details..."></textarea>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Status</label>
+                            <select id="compliance-status"
+                                class="w-full bg-[#0a0a0a] border border-[#333] rounded-lg p-3 text-white focus:outline-none focus:border-red-600 transition">
+                                <option value="pending">Pending Verification</option>
+                                <option value="verified">Verified</option>
+                                <option value="flagged">Flagged for Review</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg transition">
+                            Add Compliance Item
+                        </button>
+                    </div>
+                </form>
+            `);
+        }
+
+        async function createComplianceItem(event) {
+            event.preventDefault();
+
+            try {
+                await api('/api/compliance', 'POST', {
+                    episodeId: state.selectedEpisode,
+                    itemType: document.getElementById('compliance-type').value,
+                    title: document.getElementById('compliance-title').value,
+                    content: document.getElementById('compliance-content').value,
+                    status: document.getElementById('compliance-status').value
                 });
 
                 await loadEpisodeWorkspace(state.selectedEpisode);
