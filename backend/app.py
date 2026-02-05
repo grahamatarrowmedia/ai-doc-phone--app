@@ -20,7 +20,7 @@ app = Flask(__name__, static_folder='../frontend/dist', static_url_path='')
 app.config.from_object(Config)
 
 # Enable CORS for development
-CORS(app, origins=['http://localhost:3000', 'http://127.0.0.1:3000'])
+CORS(app, origins=['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000', 'http://127.0.0.1:3001'])
 
 # Register blueprints
 app.register_blueprint(projects_bp)
