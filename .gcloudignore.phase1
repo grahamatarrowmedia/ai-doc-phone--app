@@ -1,0 +1,33 @@
+# Ignore git files
+.git
+.gitignore
+
+# Ignore development files
+.env
+.env.local
+*.pyc
+__pycache__
+*.pyo
+.Python
+venv/
+.venv/
+node_modules/
+
+# Ignore IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Ignore test files
+tests/
+*.test.js
+*.spec.js
+
+# Ignore documentation
+*.md
+docs/
+
+# Ignore local builds
+frontend/dist/
+*.log

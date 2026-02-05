@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #1a1a1a;
+  --bg-secondary: #242424;
+  --bg-sidebar: #1e1e1e;
+  --bg-elevated: #2a2a2a;
+  --bg-input: #333333;
+  --accent-red: #e53e3e;
+  --accent-red-dark: #c53030;
+  --accent-blue: #4299e1;
+  --accent-green: #48bb78;
+  --accent-orange: #ed8936;
+  --text-primary: #f5f5f0;
+  --text-secondary: #a0a0a0;
+  --text-tertiary: #666666;
+  --border-subtle: #333333;
+  --border-medium: #444444;
+  --badge-deep-research: #e53e3e;
+  --badge-complete: #48bb78;
+  --badge-in-progress: #ed8936;
+  --bg-detail: #f5f0e8;
+  --text-detail: #1a1a1a;
+  --text-detail-muted: #666666;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Space Grotesk', sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+}
+
+/* Detail panel typography */
+.detail-panel {
+  font-family: 'Crimson Pro', serif;
+}
+
+.detail-panel h1,
+.detail-panel h2,
+.detail-panel h3,
+.detail-panel h4 {
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+/* Badge/metadata styling */
+.badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Phase progress bar */
+.progress-bar {
+  height: 4px;
+  border-radius: 2px;
+  background-color: var(--border-subtle);
+}
+
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background-color: var(--accent-red);
+  transition: width 0.3s ease;
+}
