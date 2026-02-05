@@ -230,21 +230,44 @@
             projectData: null,
             // Collections
             episodes: [],
+            series: [],
             research: [],
             interviews: [],
             shots: [],
             assets: [],
-            scripts: []
+            scripts: [],
+            // Production Factory data
+            dashboardStats: null,
+            workflowOverview: [],
+            selectedEpisode: null,
+            episodeWorkspace: {
+                activeTab: 'research',
+                researchDocs: [],
+                archiveLogs: [],
+                transcripts: [],
+                scriptVersions: [],
+                complianceItems: [],
+                agentTasks: []
+            }
+        };
+
+        // Production Factory 5-Phase Workflow
+        const WORKFLOW_PHASES = {
+            research: { order: 1, name: 'Research', icon: '🔬', color: 'blue' },
+            archive: { order: 2, name: 'Archive', icon: '📼', color: 'purple' },
+            script: { order: 3, name: 'Script', icon: '📝', color: 'green' },
+            voiceover: { order: 4, name: 'Voiceover', icon: '🎙️', color: 'orange' },
+            assembly: { order: 5, name: 'Assembly', icon: '🎬', color: 'red' }
         };
 
         const PHASES = [
-            { id: 'research', label: '1. Research', icon: '🔍', description: 'Intelligent Discovery' },
-            { id: 'episodes', label: '2. Episodes', icon: '🎬', description: 'Episode Planning' },
-            { id: 'archive', label: '3. Archive', icon: '📼', description: 'Digital Assets' },
-            { id: 'scripting', label: '4. Scripting', icon: '📝', description: 'Narrative Development' },
-            { id: 'interviews', label: '5. Interviews', icon: '💬', description: 'Expert Interviews' },
+            { id: 'episodes', label: '1. Episodes', icon: '🎬', description: 'Episode Management' },
+            { id: 'research', label: '2. Research', icon: '🔬', description: 'Deep Research' },
+            { id: 'archive', label: '3. Archive', icon: '📼', description: 'Archive & Footage' },
+            { id: 'scripting', label: '4. Scripting', icon: '📝', description: 'Script Generation' },
+            { id: 'interviews', label: '5. Interviews', icon: '💬', description: 'Interview Management' },
             { id: 'production', label: '6. Production', icon: '🎥', description: 'Shot Planning' },
-            { id: 'review', label: '7. Review', icon: '✅', description: 'Final Review' }
+            { id: 'compliance', label: '7. Compliance', icon: '✅', description: 'Compliance & Export' }
         ];
 
         // =============================================================================
@@ -293,23 +316,54 @@
         async function loadProjectData() {
             if (!state.selectedProject) return;
 
-            const [project, episodes, research, interviews, shots, assets, scripts] = await Promise.all([
+            const [project, episodes, series, research, interviews, shots, assets, scripts, dashboard, workflowOverview] = await Promise.all([
                 api(`/api/projects/${state.selectedProject}`),
                 api(`/api/projects/${state.selectedProject}/episodes`),
+                api(`/api/projects/${state.selectedProject}/series`),
                 api(`/api/projects/${state.selectedProject}/research`),
                 api(`/api/projects/${state.selectedProject}/interviews`),
                 api(`/api/projects/${state.selectedProject}/shots`),
                 api(`/api/projects/${state.selectedProject}/assets`),
-                api(`/api/projects/${state.selectedProject}/scripts`)
+                api(`/api/projects/${state.selectedProject}/scripts`),
+                api(`/api/projects/${state.selectedProject}/dashboard`).catch(() => null),
+                api(`/api/projects/${state.selectedProject}/workflow-overview`).catch(() => [])
             ]);
 
             state.projectData = project;
             state.episodes = episodes || [];
+            state.series = series || [];
             state.research = research || [];
             state.interviews = interviews || [];
             state.shots = shots || [];
             state.assets = assets || [];
             state.scripts = scripts || [];
+            state.dashboardStats = dashboard;
+            state.workflowOverview = workflowOverview || [];
+        }
+
+        async function loadEpisodeWorkspace(episodeId) {
+            state.selectedEpisode = episodeId;
+
+            const [workflow, researchDocs, archiveLogs, transcripts, scriptVersions, complianceItems, agentTasks] = await Promise.all([
+                api(`/api/episodes/${episodeId}/workflow`).catch(() => null),
+                api(`/api/episodes/${episodeId}/research-documents`).catch(() => []),
+                api(`/api/episodes/${episodeId}/archive-logs`).catch(() => []),
+                api(`/api/episodes/${episodeId}/transcripts`).catch(() => []),
+                api(`/api/episodes/${episodeId}/script-versions`).catch(() => []),
+                api(`/api/episodes/${episodeId}/compliance`).catch(() => []),
+                api(`/api/episodes/${episodeId}/agent-tasks`).catch(() => [])
+            ]);
+
+            state.episodeWorkspace = {
+                activeTab: 'research',
+                workflow: workflow,
+                researchDocs: researchDocs || [],
+                archiveLogs: archiveLogs || [],
+                transcripts: transcripts || [],
+                scriptVersions: scriptVersions || [],
+                complianceItems: complianceItems || [],
+                agentTasks: agentTasks || []
+            };
         }
 
         // =============================================================================
@@ -364,6 +418,9 @@
                 case 'episodes':
                     renderEpisodes(content);
                     break;
+                case 'episode-workspace':
+                    renderEpisodeWorkspace(content);
+                    break;
                 case 'research':
                     renderResearch(content);
                     break;
@@ -378,6 +435,9 @@
                     break;
                 case 'production':
                     renderProduction(content);
+                    break;
+                case 'compliance':
+                    renderCompliance(content);
                     break;
                 case 'review':
                     renderReview(content);
@@ -418,73 +478,171 @@
             }
 
             const progress = calculateProgress();
+            const stats = state.dashboardStats || {};
+            const phaseStats = stats.phaseStats || {};
+
+            // Calculate workflow metrics
+            const totalEpisodes = state.episodes.length;
+            const completedEpisodes = state.workflowOverview.filter(e =>
+                e.phases?.assembly?.status === 'approved'
+            ).length;
+            const inReview = state.workflowOverview.filter(e =>
+                Object.values(e.phases || {}).some(p => p.status === 'review')
+            ).length;
 
             container.innerHTML = `
-                <div class="max-w-6xl mx-auto fade-in">
-                    <header class="flex justify-between items-end mb-12">
+                <div class="max-w-7xl mx-auto fade-in">
+                    <header class="flex justify-between items-end mb-8">
                         <div>
-                            <h2 class="text-4xl font-black text-white">Production Dashboard</h2>
-                            <p class="text-gray-500 mt-2">Welcome back, <span class="text-white font-bold">Producer</span></p>
+                            <h2 class="text-4xl font-black text-white">Production Factory</h2>
+                            <p class="text-gray-500 mt-2">${state.projectData.title}</p>
                         </div>
-                        <button onclick="showNewProjectModal()" class="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg transition shadow-lg shadow-red-900/20">
-                            + New Project
-                        </button>
+                        <div class="flex gap-3">
+                            <button onclick="showNewSeriesModal()" class="bg-[#1a1a1a] border border-[#333] hover:border-[#1a73e8] text-white font-bold py-2 px-4 rounded-lg transition">
+                                + Series
+                            </button>
+                            <button onclick="showNewProjectModal()" class="bg-[#1a73e8] hover:bg-[#1557b0] text-white font-bold py-2 px-4 rounded-lg transition">
+                                + Project
+                            </button>
+                        </div>
                     </header>
 
-                    <!-- Current Project Card -->
-                    <div class="bg-[#151515] border border-[#222] rounded-xl p-6 mb-8">
-                        <div class="flex justify-between items-start mb-4">
-                            <div>
-                                <p class="text-[10px] font-mono bg-white/5 text-gray-400 px-2 py-1 rounded uppercase tracking-wider inline-block mb-2">
-                                    Current Project
-                                </p>
-                                <h3 class="text-2xl font-bold text-white">${state.projectData.title}</h3>
-                                <p class="text-gray-500 mt-1">${state.projectData.description || 'No description'}</p>
-                            </div>
-                            <span class="px-3 py-1 rounded-full text-xs font-bold ${getStatusColor(state.projectData.status)}">
-                                ${state.projectData.status || 'Planning'}
-                            </span>
-                        </div>
-
-                        <div class="space-y-4 mt-6">
-                            <div class="flex justify-between text-[10px] uppercase font-bold tracking-widest text-gray-600">
-                                <span>Overall Progress</span>
-                                <span>${progress}%</span>
-                            </div>
-                            <div class="w-full h-2 bg-[#222] rounded-full overflow-hidden">
-                                <div class="h-full bg-red-600 transition-all duration-1000" style="width: ${progress}%"></div>
-                            </div>
+                    <!-- Workflow Phase Progress -->
+                    <div class="bg-[#151515] border border-[#222] rounded-xl p-6 mb-6">
+                        <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Workflow Pipeline</h3>
+                        <div class="flex justify-between items-center gap-2">
+                            ${Object.entries(WORKFLOW_PHASES).map(([key, phase]) => {
+                                const phaseData = phaseStats[key] || {};
+                                const total = (phaseData.pending || 0) + (phaseData.in_progress || 0) + (phaseData.review || 0) + (phaseData.approved || 0);
+                                const approved = phaseData.approved || 0;
+                                const inProgress = phaseData.in_progress || 0;
+                                const review = phaseData.review || 0;
+                                return `
+                                    <div class="flex-1 text-center">
+                                        <div class="text-2xl mb-2">${phase.icon}</div>
+                                        <div class="text-xs font-bold text-white">${phase.name}</div>
+                                        <div class="mt-2 flex justify-center gap-1">
+                                            <span class="px-2 py-0.5 bg-green-500/20 text-green-400 text-xs rounded">${approved}</span>
+                                            ${review > 0 ? `<span class="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 text-xs rounded">${review}</span>` : ''}
+                                            ${inProgress > 0 ? `<span class="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs rounded">${inProgress}</span>` : ''}
+                                        </div>
+                                    </div>
+                                    ${phase.order < 5 ? '<div class="text-gray-600">→</div>' : ''}
+                                `;
+                            }).join('')}
                         </div>
                     </div>
 
                     <!-- Stats Grid -->
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                        ${renderStatCard('Episodes', state.episodes.length, '🎬')}
-                        ${renderStatCard('Research', state.research.length, '🔍')}
-                        ${renderStatCard('Interviews', state.interviews.length, '💬')}
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                        ${renderStatCard('Total Episodes', totalEpisodes, '🎬')}
+                        ${renderStatCard('Completed', completedEpisodes, '✅')}
+                        ${renderStatCard('In Review', inReview, '👁️')}
+                        ${renderStatCard('Series', state.series.length, '📺')}
                         ${renderStatCard('Assets', state.assets.length, '📼')}
                     </div>
 
+                    <!-- Bottleneck Alerts -->
+                    ${inReview > 0 ? `
+                        <div class="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 mb-6">
+                            <div class="flex items-center gap-3">
+                                <span class="text-2xl">⚠️</span>
+                                <div>
+                                    <h4 class="font-bold text-yellow-400">Human Review Required</h4>
+                                    <p class="text-sm text-yellow-300/70">${inReview} episode(s) waiting for producer approval</p>
+                                </div>
+                                <button onclick="setPhase('episodes')" class="ml-auto bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 px-4 py-2 rounded-lg transition">
+                                    Review Now
+                                </button>
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    <!-- Series Overview -->
+                    ${state.series.length > 0 ? `
+                        <div class="bg-[#151515] border border-[#222] rounded-xl p-6 mb-6">
+                            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Series Overview</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                ${state.series.map(series => {
+                                    const seriesEpisodes = state.episodes.filter(e => e.seriesId === series.id);
+                                    const completed = state.workflowOverview.filter(e =>
+                                        e.seriesId === series.id && e.phases?.assembly?.status === 'approved'
+                                    ).length;
+                                    return `
+                                        <div class="bg-[#1a1a1a] border border-[#333] rounded-lg p-4 hover:border-[#1a73e8] transition cursor-pointer" onclick="filterBySeries('${series.id}')">
+                                            <h4 class="font-bold text-white">${series.title}</h4>
+                                            <p class="text-sm text-gray-500 mt-1">${seriesEpisodes.length} episodes • ${completed} completed</p>
+                                            <div class="mt-3 h-1.5 bg-[#222] rounded-full overflow-hidden">
+                                                <div class="h-full bg-[#1a73e8]" style="width: ${seriesEpisodes.length > 0 ? (completed / seriesEpisodes.length * 100) : 0}%"></div>
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+
                     <!-- Quick Actions -->
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <button onclick="setPhase('ai-research')" class="bg-[#1a1a1a] border border-[#222] hover:border-[#1a73e8] p-6 rounded-xl text-left transition group">
-                            <div class="text-2xl mb-3">🤖</div>
-                            <h4 class="font-bold text-white group-hover:text-[#1a73e8] transition">AI Deep Research</h4>
-                            <p class="text-sm text-gray-500 mt-1">Generate research with AI</p>
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <button onclick="setPhase('episodes')" class="bg-[#1a1a1a] border border-[#222] hover:border-[#1a73e8] p-5 rounded-xl text-left transition group">
+                            <div class="text-2xl mb-2">🎬</div>
+                            <h4 class="font-bold text-white group-hover:text-[#1a73e8] transition">Episode Workspace</h4>
+                            <p class="text-xs text-gray-500 mt-1">Manage episode workflow</p>
                         </button>
-                        <button onclick="setPhase('episodes')" class="bg-[#1a1a1a] border border-[#222] hover:border-red-600 p-6 rounded-xl text-left transition group">
-                            <div class="text-2xl mb-3">🎬</div>
-                            <h4 class="font-bold text-white group-hover:text-red-500 transition">Manage Episodes</h4>
-                            <p class="text-sm text-gray-500 mt-1">Plan and organize episodes</p>
+                        <button onclick="setPhase('scripting')" class="bg-[#1a1a1a] border border-[#222] hover:border-green-600 p-5 rounded-xl text-left transition group">
+                            <div class="text-2xl mb-2">🤖</div>
+                            <h4 class="font-bold text-white group-hover:text-green-500 transition">AI Script Swarm</h4>
+                            <p class="text-xs text-gray-500 mt-1">Multi-agent script generation</p>
                         </button>
-                        <button onclick="setPhase('scripting')" class="bg-[#1a1a1a] border border-[#222] hover:border-purple-600 p-6 rounded-xl text-left transition group">
-                            <div class="text-2xl mb-3">📝</div>
-                            <h4 class="font-bold text-white group-hover:text-purple-500 transition">Script Editor</h4>
-                            <p class="text-sm text-gray-500 mt-1">Write and edit scripts</p>
+                        <button onclick="setPhase('archive')" class="bg-[#1a1a1a] border border-[#222] hover:border-purple-600 p-5 rounded-xl text-left transition group">
+                            <div class="text-2xl mb-2">📼</div>
+                            <h4 class="font-bold text-white group-hover:text-purple-500 transition">Archive Import</h4>
+                            <p class="text-xs text-gray-500 mt-1">Import Quickture logs</p>
+                        </button>
+                        <button onclick="setPhase('compliance')" class="bg-[#1a1a1a] border border-[#222] hover:border-red-600 p-5 rounded-xl text-left transition group">
+                            <div class="text-2xl mb-2">✅</div>
+                            <h4 class="font-bold text-white group-hover:text-red-500 transition">Compliance</h4>
+                            <p class="text-xs text-gray-500 mt-1">Export audit trail</p>
                         </button>
                     </div>
+
+                    <!-- Recent Episode Activity -->
+                    ${state.workflowOverview.length > 0 ? `
+                        <div class="mt-6 bg-[#151515] border border-[#222] rounded-xl p-6">
+                            <h3 class="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4">Episode Activity</h3>
+                            <div class="space-y-2 max-h-64 overflow-y-auto">
+                                ${state.workflowOverview.slice(0, 10).map(ep => `
+                                    <div class="flex items-center justify-between p-3 bg-[#1a1a1a] rounded-lg hover:bg-[#222] transition cursor-pointer" onclick="openEpisodeWorkspace('${ep.episodeId}')">
+                                        <div class="flex items-center gap-3">
+                                            <span class="text-lg">${WORKFLOW_PHASES[ep.currentPhase]?.icon || '🎬'}</span>
+                                            <div>
+                                                <h4 class="font-medium text-white text-sm">${ep.episodeTitle}</h4>
+                                                <p class="text-xs text-gray-500">${WORKFLOW_PHASES[ep.currentPhase]?.name || ep.currentPhase}</p>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs text-gray-500">${Math.round(ep.progress || 0)}%</span>
+                                            <div class="w-20 h-1.5 bg-[#333] rounded-full overflow-hidden">
+                                                <div class="h-full bg-[#1a73e8]" style="width: ${ep.progress || 0}%"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
                 </div>
             `;
+        }
+
+        function filterBySeries(seriesId) {
+            state.filterSeriesId = seriesId;
+            setPhase('episodes');
+        }
+
+        async function openEpisodeWorkspace(episodeId) {
+            await loadEpisodeWorkspace(episodeId);
+            setPhase('episode-workspace');
         }
 
         function renderStatCard(label, value, icon) {
@@ -1040,6 +1198,468 @@
                             </table>
                         </div>
                     `}
+                </div>
+            `;
+        }
+
+        // =============================================================================
+        // EPISODE WORKSPACE
+        // =============================================================================
+        function renderEpisodeWorkspace(container) {
+            const episode = state.episodes.find(e => e.id === state.selectedEpisode);
+            if (!episode) {
+                container.innerHTML = '<div class="text-center py-16 text-gray-500">No episode selected</div>';
+                return;
+            }
+
+            const workspace = state.episodeWorkspace;
+            const workflow = workspace.workflow || {};
+            const tabs = [
+                { id: 'research', label: 'Research', icon: '🔬', count: workspace.researchDocs.length },
+                { id: 'archive', label: 'Archive', icon: '📼', count: workspace.archiveLogs.length },
+                { id: 'script', label: 'Script', icon: '📝', count: workspace.scriptVersions.length },
+                { id: 'compliance', label: 'Compliance', icon: '✅', count: workspace.complianceItems.length }
+            ];
+
+            container.innerHTML = `
+                <div class="max-w-7xl mx-auto fade-in">
+                    <!-- Header -->
+                    <div class="flex items-center gap-4 mb-6">
+                        <button onclick="setPhase('episodes')" class="text-gray-400 hover:text-white transition">
+                            ← Back
+                        </button>
+                        <div class="flex-1">
+                            <h2 class="text-2xl font-bold text-white">${episode.title}</h2>
+                            <p class="text-gray-500 text-sm">${episode.description || 'No description'}</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-lg">${WORKFLOW_PHASES[workflow.currentPhase]?.icon || '🎬'}</span>
+                            <span class="text-sm text-gray-400">${WORKFLOW_PHASES[workflow.currentPhase]?.name || 'Research'}</span>
+                        </div>
+                    </div>
+
+                    <!-- Workflow Progress -->
+                    <div class="bg-[#151515] border border-[#222] rounded-xl p-4 mb-6">
+                        <div class="flex justify-between items-center">
+                            ${Object.entries(WORKFLOW_PHASES).map(([key, phase]) => {
+                                const phaseData = workflow.phases?.[key] || {};
+                                const isCurrent = workflow.currentPhase === key;
+                                const isCompleted = phaseData.status === 'approved';
+                                const isReview = phaseData.status === 'review';
+                                return `
+                                    <div class="flex-1 text-center ${isCurrent ? 'opacity-100' : 'opacity-50'}">
+                                        <div class="text-xl mb-1 ${isCompleted ? 'text-green-400' : isReview ? 'text-yellow-400' : ''}">${phase.icon}</div>
+                                        <div class="text-xs ${isCurrent ? 'text-white font-bold' : 'text-gray-500'}">${phase.name}</div>
+                                        ${isCompleted ? '<div class="text-[10px] text-green-400">✓</div>' : ''}
+                                        ${isReview ? '<div class="text-[10px] text-yellow-400">Review</div>' : ''}
+                                    </div>
+                                    ${phase.order < 5 ? '<div class="text-gray-600">→</div>' : ''}
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+
+                    <!-- Tabs -->
+                    <div class="flex gap-2 mb-6 border-b border-[#222] pb-4">
+                        ${tabs.map(tab => `
+                            <button onclick="setWorkspaceTab('${tab.id}')"
+                                class="px-4 py-2 rounded-lg transition ${workspace.activeTab === tab.id
+                                    ? 'bg-[#1a73e8] text-white'
+                                    : 'bg-[#1a1a1a] text-gray-400 hover:text-white'}">
+                                ${tab.icon} ${tab.label}
+                                <span class="ml-1 text-xs opacity-60">(${tab.count})</span>
+                            </button>
+                        `).join('')}
+                    </div>
+
+                    <!-- Tab Content -->
+                    <div id="workspace-tab-content">
+                        ${renderWorkspaceTabContent(workspace)}
+                    </div>
+                </div>
+            `;
+        }
+
+        function setWorkspaceTab(tabId) {
+            state.episodeWorkspace.activeTab = tabId;
+            const content = document.getElementById('workspace-tab-content');
+            if (content) {
+                content.innerHTML = renderWorkspaceTabContent(state.episodeWorkspace);
+            }
+        }
+
+        function renderWorkspaceTabContent(workspace) {
+            switch (workspace.activeTab) {
+                case 'research':
+                    return renderWorkspaceResearch(workspace);
+                case 'archive':
+                    return renderWorkspaceArchive(workspace);
+                case 'script':
+                    return renderWorkspaceScript(workspace);
+                case 'compliance':
+                    return renderWorkspaceCompliance(workspace);
+                default:
+                    return '';
+            }
+        }
+
+        function renderWorkspaceResearch(workspace) {
+            return `
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-lg font-bold text-white">Research Documents</h3>
+                        <div class="flex gap-2">
+                            <button onclick="runResearchAgent()" class="bg-[#1a73e8] hover:bg-[#1557b0] text-white px-4 py-2 rounded-lg transition text-sm">
+                                🤖 AI Research
+                            </button>
+                            <button onclick="showAddResearchDoc()" class="bg-[#1a1a1a] border border-[#333] hover:border-[#1a73e8] text-white px-4 py-2 rounded-lg transition text-sm">
+                                + Add Document
+                            </button>
+                        </div>
+                    </div>
+
+                    ${workspace.researchDocs.length === 0 ? `
+                        <div class="text-center py-12 bg-[#151515] rounded-xl border border-[#222]">
+                            <div class="text-4xl mb-4">🔬</div>
+                            <p class="text-gray-500">No research documents yet</p>
+                            <p class="text-sm text-gray-600 mt-2">Upload documents or run AI research</p>
+                        </div>
+                    ` : `
+                        <div class="grid gap-3">
+                            ${workspace.researchDocs.map(doc => `
+                                <div class="bg-[#151515] border border-[#222] rounded-lg p-4 hover:border-[#333] transition">
+                                    <div class="flex justify-between items-start">
+                                        <div>
+                                            <span class="text-xs px-2 py-0.5 rounded ${
+                                                doc.documentType === 'agent_output' ? 'bg-blue-500/20 text-blue-400' :
+                                                doc.documentType === 'fact_check' ? 'bg-green-500/20 text-green-400' :
+                                                'bg-gray-500/20 text-gray-400'
+                                            }">${doc.documentType || 'uploaded'}</span>
+                                            <h4 class="font-medium text-white mt-2">${doc.title || 'Untitled'}</h4>
+                                            <p class="text-sm text-gray-500 mt-1 line-clamp-2">${doc.content?.substring(0, 200) || ''}...</p>
+                                        </div>
+                                        <span class="text-xs px-2 py-0.5 rounded ${
+                                            doc.confidenceLevel === 'verified' ? 'bg-green-500/20 text-green-400' :
+                                            doc.confidenceLevel === 'probable' ? 'bg-yellow-500/20 text-yellow-400' :
+                                            'bg-red-500/20 text-red-400'
+                                        }">${doc.confidenceLevel || 'unverified'}</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `}
+                </div>
+            `;
+        }
+
+        function renderWorkspaceArchive(workspace) {
+            const totalClips = workspace.archiveLogs.reduce((sum, log) => sum + (log.clipCount || 0), 0);
+
+            return `
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-lg font-bold text-white">Archive Logs (${totalClips} clips)</h3>
+                        <button onclick="showImportArchiveModal()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition text-sm">
+                            📥 Import CSV
+                        </button>
+                    </div>
+
+                    ${workspace.archiveLogs.length === 0 ? `
+                        <div class="text-center py-12 bg-[#151515] rounded-xl border border-[#222]">
+                            <div class="text-4xl mb-4">📼</div>
+                            <p class="text-gray-500">No archive logs imported</p>
+                            <p class="text-sm text-gray-600 mt-2">Import from Quickture or add manually</p>
+                        </div>
+                    ` : `
+                        <div class="space-y-3">
+                            ${workspace.archiveLogs.map(log => `
+                                <div class="bg-[#151515] border border-[#222] rounded-lg p-4">
+                                    <div class="flex justify-between items-center mb-3">
+                                        <span class="text-xs px-2 py-0.5 rounded bg-purple-500/20 text-purple-400">${log.source || 'manual'}</span>
+                                        <span class="text-xs text-gray-500">${log.clipCount || 0} clips</span>
+                                    </div>
+                                    ${log.clips?.slice(0, 5).map(clip => `
+                                        <div class="text-sm py-2 border-t border-[#222] first:border-0">
+                                            <span class="text-gray-400">${clip.timecodeIn || ''}</span>
+                                            <span class="text-white ml-2">${clip.description || clip.filename}</span>
+                                        </div>
+                                    `).join('')}
+                                    ${(log.clips?.length || 0) > 5 ? `<p class="text-xs text-gray-500 mt-2">+ ${log.clips.length - 5} more clips</p>` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    `}
+                </div>
+            `;
+        }
+
+        function renderWorkspaceScript(workspace) {
+            const currentVersion = workspace.scriptVersions[workspace.scriptVersions.length - 1];
+
+            return `
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-lg font-bold text-white">Script Workspace</h3>
+                        <div class="flex gap-2">
+                            <button onclick="runScriptSwarm()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition text-sm">
+                                🤖 Generate Script
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Version History -->
+                    ${workspace.scriptVersions.length > 0 ? `
+                        <div class="flex gap-2 flex-wrap">
+                            ${workspace.scriptVersions.map((v, i) => `
+                                <button onclick="viewScriptVersion('${v.id}')"
+                                    class="px-3 py-1 rounded text-sm ${
+                                        v.isLocked ? 'bg-green-600 text-white' :
+                                        i === workspace.scriptVersions.length - 1 ? 'bg-[#1a73e8] text-white' :
+                                        'bg-[#1a1a1a] text-gray-400'
+                                    }">
+                                    ${v.versionType || 'V' + v.versionNumber}
+                                    ${v.isLocked ? '🔒' : ''}
+                                </button>
+                            `).join('')}
+                        </div>
+                    ` : ''}
+
+                    <!-- Current Script -->
+                    ${currentVersion ? `
+                        <div class="bg-[#151515] border border-[#222] rounded-xl p-6">
+                            <div class="flex justify-between items-center mb-4">
+                                <h4 class="font-bold text-white">${currentVersion.versionType || 'Draft'}</h4>
+                                ${!currentVersion.isLocked ? `
+                                    <button onclick="lockScript('${currentVersion.id}')" class="text-xs bg-green-600/20 text-green-400 px-3 py-1 rounded hover:bg-green-600/30 transition">
+                                        Lock as Final
+                                    </button>
+                                ` : ''}
+                            </div>
+                            <div class="markdown-content max-h-96 overflow-y-auto">
+                                ${marked.parse(currentVersion.content || 'No content')}
+                            </div>
+                        </div>
+                    ` : `
+                        <div class="text-center py-12 bg-[#151515] rounded-xl border border-[#222]">
+                            <div class="text-4xl mb-4">📝</div>
+                            <p class="text-gray-500">No script generated yet</p>
+                            <p class="text-sm text-gray-600 mt-2">Use AI Script Swarm to generate</p>
+                        </div>
+                    `}
+
+                    <!-- Agent Activity -->
+                    ${workspace.agentTasks.length > 0 ? `
+                        <div class="mt-6">
+                            <h4 class="text-sm font-bold text-gray-400 uppercase mb-3">Agent Activity</h4>
+                            <div class="space-y-2">
+                                ${workspace.agentTasks.slice(-5).map(task => `
+                                    <div class="flex items-center gap-3 p-2 bg-[#1a1a1a] rounded">
+                                        <span class="text-lg">${
+                                            task.agentType === 'research_specialist' ? '🔬' :
+                                            task.agentType === 'archive_specialist' ? '📼' :
+                                            task.agentType === 'interview_producer' ? '🎙️' :
+                                            task.agentType === 'script_writer' ? '📝' :
+                                            task.agentType === 'fact_checker' ? '✅' : '🤖'
+                                        }</span>
+                                        <div class="flex-1">
+                                            <p class="text-sm text-white">${task.agentInfo?.name || task.agentType}</p>
+                                            <p class="text-xs text-gray-500">${task.taskType}</p>
+                                        </div>
+                                        <span class="text-xs px-2 py-0.5 rounded ${
+                                            task.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                                            task.status === 'in_progress' ? 'bg-blue-500/20 text-blue-400' :
+                                            task.status === 'failed' ? 'bg-red-500/20 text-red-400' :
+                                            'bg-gray-500/20 text-gray-400'
+                                        }">${task.status}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        function renderWorkspaceCompliance(workspace) {
+            const grouped = {
+                source_citation: workspace.complianceItems.filter(i => i.itemType === 'source_citation'),
+                archive_license: workspace.complianceItems.filter(i => i.itemType === 'archive_license'),
+                exif_metadata: workspace.complianceItems.filter(i => i.itemType === 'exif_metadata'),
+                legal_signoff: workspace.complianceItems.filter(i => i.itemType === 'legal_signoff')
+            };
+
+            return `
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-lg font-bold text-white">Compliance Package</h3>
+                        <button onclick="exportCompliancePackage()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition text-sm">
+                            📄 Export Package
+                        </button>
+                    </div>
+
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        ${[
+                            { key: 'source_citation', label: 'Source Citations', icon: '📚' },
+                            { key: 'archive_license', label: 'Archive Licenses', icon: '📜' },
+                            { key: 'exif_metadata', label: 'EXIF Metadata', icon: '🏷️' },
+                            { key: 'legal_signoff', label: 'Legal Signoffs', icon: '⚖️' }
+                        ].map(cat => `
+                            <div class="bg-[#151515] border border-[#222] rounded-lg p-4 text-center">
+                                <div class="text-2xl mb-2">${cat.icon}</div>
+                                <p class="text-2xl font-bold text-white">${grouped[cat.key].length}</p>
+                                <p class="text-xs text-gray-500">${cat.label}</p>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    ${workspace.complianceItems.length > 0 ? `
+                        <div class="bg-[#151515] border border-[#222] rounded-xl p-4 mt-4">
+                            <h4 class="text-sm font-bold text-gray-400 uppercase mb-3">Recent Items</h4>
+                            <div class="space-y-2 max-h-64 overflow-y-auto">
+                                ${workspace.complianceItems.slice(0, 10).map(item => `
+                                    <div class="flex items-center justify-between p-2 bg-[#1a1a1a] rounded">
+                                        <div>
+                                            <p class="text-sm text-white">${item.title || item.claim || 'Untitled'}</p>
+                                            <p class="text-xs text-gray-500">${item.itemType}</p>
+                                        </div>
+                                        <span class="text-xs px-2 py-0.5 rounded ${
+                                            item.status === 'verified' ? 'bg-green-500/20 text-green-400' :
+                                            item.status === 'flagged' ? 'bg-red-500/20 text-red-400' :
+                                            'bg-yellow-500/20 text-yellow-400'
+                                        }">${item.status}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : `
+                        <div class="text-center py-8 text-gray-500">
+                            <p>Compliance items will be auto-generated during script creation</p>
+                        </div>
+                    `}
+                </div>
+            `;
+        }
+
+        async function runResearchAgent() {
+            if (!state.selectedEpisode) return;
+
+            const episode = state.episodes.find(e => e.id === state.selectedEpisode);
+            if (!episode) return;
+
+            showModal('AI Research Agent', '<div class="text-center py-8"><div class="animate-spin text-4xl">🔬</div><p class="mt-4 text-gray-400">Running research agent...</p></div>');
+
+            try {
+                const result = await api('/api/ai/research-agent', 'POST', {
+                    episodeId: state.selectedEpisode,
+                    brief: episode.brief || { summary: episode.description }
+                });
+
+                await loadEpisodeWorkspace(state.selectedEpisode);
+                closeModal();
+                render();
+            } catch (error) {
+                showModal('Error', `<p class="text-red-400">${error.message}</p>`);
+            }
+        }
+
+        async function runScriptSwarm() {
+            if (!state.selectedEpisode) return;
+
+            showModal('AI Script Swarm', `
+                <div class="text-center py-8">
+                    <div class="text-4xl mb-4">🤖</div>
+                    <p class="text-white font-bold mb-2">Launching Agent Swarm</p>
+                    <p class="text-gray-400 text-sm">5 specialized agents working together...</p>
+                    <div class="mt-6 space-y-2 text-left max-w-sm mx-auto">
+                        <div class="flex items-center gap-2 text-gray-500"><span>🔬</span> Research Specialist</div>
+                        <div class="flex items-center gap-2 text-gray-500"><span>📼</span> Archive Specialist</div>
+                        <div class="flex items-center gap-2 text-gray-500"><span>🎙️</span> Interview Producer</div>
+                        <div class="flex items-center gap-2 text-gray-500"><span>📝</span> Script Writer</div>
+                        <div class="flex items-center gap-2 text-gray-500"><span>✅</span> Fact Checker</div>
+                    </div>
+                </div>
+            `);
+
+            try {
+                const result = await api('/api/ai/script-swarm', 'POST', {
+                    episodeId: state.selectedEpisode
+                });
+
+                await loadEpisodeWorkspace(state.selectedEpisode);
+                closeModal();
+                render();
+            } catch (error) {
+                showModal('Error', `<p class="text-red-400">${error.message}</p>`);
+            }
+        }
+
+        async function exportCompliancePackage() {
+            if (!state.selectedEpisode) return;
+
+            try {
+                const result = await api(`/api/episodes/${state.selectedEpisode}/compliance/export`);
+                showModal('Compliance Package', `
+                    <div class="space-y-4">
+                        <p class="text-sm text-gray-400">Export ready for: ${result.episodeTitle}</p>
+                        <div class="grid grid-cols-2 gap-4 text-center">
+                            <div class="bg-green-500/10 p-3 rounded"><span class="text-green-400 font-bold">${result.summary?.verified || 0}</span><br><span class="text-xs text-gray-500">Verified</span></div>
+                            <div class="bg-yellow-500/10 p-3 rounded"><span class="text-yellow-400 font-bold">${result.summary?.pending || 0}</span><br><span class="text-xs text-gray-500">Pending</span></div>
+                        </div>
+                        <pre class="bg-[#111] p-4 rounded text-xs overflow-auto max-h-64">${JSON.stringify(result, null, 2)}</pre>
+                    </div>
+                `);
+            } catch (error) {
+                showModal('Error', `<p class="text-red-400">${error.message}</p>`);
+            }
+        }
+
+        // =============================================================================
+        // COMPLIANCE (Global)
+        // =============================================================================
+        function renderCompliance(container) {
+            container.innerHTML = `
+                <div class="max-w-6xl mx-auto fade-in">
+                    <div class="mb-8">
+                        <h2 class="text-3xl font-black uppercase italic tracking-tighter">Compliance Dashboard</h2>
+                        <p class="text-gray-500">Audit trail and legal compliance tracking.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Episodes Compliance Status -->
+                        <div class="bg-[#151515] border border-[#222] rounded-xl p-6">
+                            <h3 class="text-lg font-bold text-white mb-4">Episodes Compliance</h3>
+                            <div class="space-y-3">
+                                ${state.episodes.slice(0, 10).map(ep => `
+                                    <div class="flex items-center justify-between p-3 bg-[#1a1a1a] rounded-lg">
+                                        <span class="text-white">${ep.title}</span>
+                                        <button onclick="openEpisodeWorkspace('${ep.id}'); setTimeout(() => setWorkspaceTab('compliance'), 100);"
+                                            class="text-xs bg-[#1a73e8]/20 text-[#1a73e8] px-3 py-1 rounded hover:bg-[#1a73e8]/30 transition">
+                                            View
+                                        </button>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+
+                        <!-- Quick Export -->
+                        <div class="bg-[#151515] border border-[#222] rounded-xl p-6">
+                            <h3 class="text-lg font-bold text-white mb-4">Export Options</h3>
+                            <div class="space-y-3">
+                                <button class="w-full p-4 bg-[#1a1a1a] rounded-lg text-left hover:bg-[#222] transition">
+                                    <div class="font-bold text-white">Full Audit Trail</div>
+                                    <p class="text-xs text-gray-500 mt-1">PDF + XML export of all compliance data</p>
+                                </button>
+                                <button class="w-full p-4 bg-[#1a1a1a] rounded-lg text-left hover:bg-[#222] transition">
+                                    <div class="font-bold text-white">AI Fingerprints</div>
+                                    <p class="text-xs text-gray-500 mt-1">EXIF metadata for all AI-generated content</p>
+                                </button>
+                                <button class="w-full p-4 bg-[#1a1a1a] rounded-lg text-left hover:bg-[#222] transition">
+                                    <div class="font-bold text-white">Source Citations</div>
+                                    <p class="text-xs text-gray-500 mt-1">Complete source citation log</p>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             `;
         }
