@@ -29,7 +29,7 @@ DOWNLOAD_TIMEOUT = 30
 
 # App version and environment
 APP_VERSION = os.environ.get("APP_VERSION", "1.0.0")
-APP_ENV = os.environ.get("APP_ENV", "production")
+APP_ENV = os.environ.get("APP_ENV", "prod")
 
 # Initialize Vertex AI
 vertexai.init(project=PROJECT_ID, location=LOCATION)
@@ -41,17 +41,20 @@ db = firestore.Client()
 # Initialize Cloud Storage
 storage_client = storage.Client()
 
-# Collection names
+# Collection prefix based on environment (dev uses separate collections)
+COLLECTION_PREFIX = "dev_" if APP_ENV == "dev" else ""
+
+# Collection names (prefixed by environment)
 COLLECTIONS = {
-    'projects': 'doc_projects',
-    'episodes': 'doc_episodes',
-    'series': 'doc_series',
-    'research': 'doc_research',
-    'interviews': 'doc_interviews',
-    'shots': 'doc_shots',
-    'assets': 'doc_assets',
-    'scripts': 'doc_scripts',
-    'feedback': 'doc_feedback'
+    'projects': f'{COLLECTION_PREFIX}doc_projects',
+    'episodes': f'{COLLECTION_PREFIX}doc_episodes',
+    'series': f'{COLLECTION_PREFIX}doc_series',
+    'research': f'{COLLECTION_PREFIX}doc_research',
+    'interviews': f'{COLLECTION_PREFIX}doc_interviews',
+    'shots': f'{COLLECTION_PREFIX}doc_shots',
+    'assets': f'{COLLECTION_PREFIX}doc_assets',
+    'scripts': f'{COLLECTION_PREFIX}doc_scripts',
+    'feedback': f'{COLLECTION_PREFIX}doc_feedback'
 }
 
 
