@@ -10,6 +10,9 @@ import uuid
 from datetime import datetime
 from urllib.parse import urlparse
 
+from dotenv import load_dotenv
+load_dotenv()  # Load .env file for local development
+
 import requests
 from flask import Flask, render_template, request, jsonify, Response
 from google.cloud import firestore, storage
