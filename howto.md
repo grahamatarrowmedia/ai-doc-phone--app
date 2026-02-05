@@ -281,16 +281,49 @@ For interview footage:
 [Metadata: Emotional moment, technical explanation, suitable for voiceover bed]
 ```
 
-### Step 5: Add Manual Archive Entries
+### Step 5: Upload Archive Files
 
-To add archive footage not from Quickture:
+To upload files directly to the archive:
 
-1. Click **"+ Add Archive Log"**
-2. Enter:
-   - Source name
-   - Source type (NASA API, direct upload, etc.)
-   - Individual clips with timecodes
-3. Click **"Save"**
+1. In the Episode Workspace, click the **"Archive"** tab
+2. Click **"📁 Upload Files"**
+3. Select a file to upload:
+   - **Video**: MP4, MOV, MXF, ProRes, etc.
+   - **Audio**: MP3, WAV, AIFF, AAC
+   - **Images**: JPG, PNG, TIFF
+   - **Documents**: PDF, DOC, DOCX, TXT
+4. Choose the **Source Type**:
+   - Direct Upload
+   - NASA Archive
+   - Getty Images
+   - Pond5
+   - Interview Recording
+   - B-Roll Footage
+5. Add a **Description** of the content
+6. Enter **Keywords** (comma-separated) for searchability
+7. Add **Technical Notes** (e.g., "4K, 24fps, ProRes 422")
+8. Click **"📁 Upload to Archive"**
+
+The upload progress will display, and the file will appear in your archive logs.
+
+### Viewing Uploaded Files
+
+To view or download an uploaded file:
+
+1. Find the file in the Archive tab
+2. Click the **"View"** button on the file card
+3. Review file details (description, keywords, technical notes)
+4. Click **"📥 Download File"** to download
+
+### Step 6: Add Manual Archive Entries (CSV Import)
+
+To import archive logs from Quickture or other sources:
+
+1. Click **"📥 Import CSV"**
+2. Select the source type
+3. Paste your CSV content with columns:
+   - Filename, Timecode_In, Timecode_Out, Description, Keywords, Technical_Notes, Getty_ID
+4. Click **"📥 Import Archive Log"**
 
 ### Step 6: Review and Approve
 

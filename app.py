@@ -2977,6 +2977,104 @@ def delete_archive_log(log_id):
     return jsonify({"success": True})
 
 
+@app.route("/api/archive-logs/upload", methods=["POST"])
+def upload_archive_file():
+    """Upload a file to the archive bucket and create an archive log entry."""
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No file selected"}), 400
+
+    # Get form data
+    episode_id = request.form.get('episodeId')
+    project_id = request.form.get('projectId')
+    source_type = request.form.get('sourceType', 'upload')  # upload, nasa, getty, pond5
+    description = request.form.get('description', '')
+    keywords = request.form.get('keywords', '')
+    technical_notes = request.form.get('technicalNotes', '')
+
+    if not episode_id:
+        return jsonify({"error": "episodeId is required"}), 400
+
+    try:
+        # Read file content
+        file_content = file.read()
+        file_size = len(file_content)
+
+        # Determine content type
+        content_type = file.content_type or 'application/octet-stream'
+
+        # Generate safe filename
+        original_filename = file.filename
+        safe_filename = re.sub(r'[^\w\-.]', '_', original_filename)
+
+        # Generate unique path
+        file_hash = hashlib.md5(file_content).hexdigest()[:8]
+        blob_path = f"archive/{episode_id}/{file_hash}_{safe_filename}"
+
+        # Upload to GCS
+        ensure_bucket_exists(STORAGE_BUCKET)
+        bucket = storage_client.bucket(STORAGE_BUCKET)
+        blob = bucket.blob(blob_path)
+        blob.upload_from_string(file_content, content_type=content_type)
+
+        print(f"Uploaded archive file: {blob_path} ({file_size} bytes)")
+
+        # Determine file type for categorization
+        file_ext = original_filename.rsplit('.', 1)[-1].lower() if '.' in original_filename else ''
+        file_category = 'document'
+        if file_ext in ['mp4', 'mov', 'avi', 'mkv', 'webm', 'mxf', 'prores']:
+            file_category = 'video'
+        elif file_ext in ['mp3', 'wav', 'aiff', 'aac', 'm4a']:
+            file_category = 'audio'
+        elif file_ext in ['jpg', 'jpeg', 'png', 'gif', 'tiff', 'bmp', 'webp']:
+            file_category = 'image'
+        elif file_ext in ['pdf', 'doc', 'docx', 'txt', 'rtf']:
+            file_category = 'document'
+
+        # Create archive log entry with file info
+        log_data = {
+            'episodeId': episode_id,
+            'projectId': project_id,
+            'source': source_type,
+            'sourceName': original_filename,
+            'fileCategory': file_category,
+            'clips': [{
+                'filename': original_filename,
+                'description': description,
+                'keywords': [k.strip() for k in keywords.split(',') if k.strip()] if keywords else [],
+                'technicalNotes': technical_notes,
+                'gcsPath': blob_path,
+                'mimeType': content_type,
+                'sizeBytes': file_size
+            }],
+            'clipCount': 1,
+            'gcsPath': blob_path,
+            'filename': original_filename,
+            'mimeType': content_type,
+            'sizeBytes': file_size,
+            'hasFile': True,
+            'uploadedAt': datetime.utcnow().isoformat()
+        }
+
+        log = create_doc('archive_logs', log_data)
+
+        return jsonify({
+            "success": True,
+            "archiveLog": log,
+            "gcsPath": blob_path,
+            "filename": original_filename,
+            "size": file_size,
+            "category": file_category
+        }), 201
+
+    except Exception as e:
+        print(f"Error uploading archive file: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # --- Interview Transcripts ---
 @app.route("/api/episodes/<episode_id>/transcripts", methods=["GET"])
 def get_episode_transcripts(episode_id):

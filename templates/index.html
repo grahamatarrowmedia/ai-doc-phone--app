@@ -1361,29 +1361,63 @@
                 <div class="space-y-4">
                     <div class="flex justify-between items-center">
                         <h3 class="text-lg font-bold text-white">Archive Logs (${totalClips} clips)</h3>
-                        <button onclick="showImportArchiveModal()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition text-sm">
-                            📥 Import CSV
-                        </button>
+                        <div class="flex gap-2">
+                            <button onclick="showUploadArchiveModal()" class="bg-[#1a1a1a] border border-[#333] hover:border-purple-600 text-white px-4 py-2 rounded-lg transition text-sm">
+                                📁 Upload Files
+                            </button>
+                            <button onclick="showImportArchiveModal()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition text-sm">
+                                📥 Import CSV
+                            </button>
+                        </div>
                     </div>
 
                     ${workspace.archiveLogs.length === 0 ? `
                         <div class="text-center py-12 bg-[#151515] rounded-xl border border-[#222]">
                             <div class="text-4xl mb-4">📼</div>
-                            <p class="text-gray-500">No archive logs imported</p>
-                            <p class="text-sm text-gray-600 mt-2">Import from Quickture or add manually</p>
+                            <p class="text-gray-500">No archive files uploaded</p>
+                            <p class="text-sm text-gray-600 mt-2">Upload documents, video, or audio files, or import from Quickture CSV</p>
                         </div>
                     ` : `
                         <div class="space-y-3">
                             ${workspace.archiveLogs.map(log => `
-                                <div class="bg-[#151515] border border-[#222] rounded-lg p-4">
+                                <div class="bg-[#151515] border border-[#222] rounded-lg p-4 hover:border-[#333] transition">
                                     <div class="flex justify-between items-center mb-3">
-                                        <span class="text-xs px-2 py-0.5 rounded bg-purple-500/20 text-purple-400">${log.source || 'manual'}</span>
-                                        <span class="text-xs text-gray-500">${log.clipCount || 0} clips</span>
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-lg">${
+                                                log.fileCategory === 'video' ? '🎬' :
+                                                log.fileCategory === 'audio' ? '🎵' :
+                                                log.fileCategory === 'image' ? '🖼️' :
+                                                log.source === 'quickture' ? '📼' :
+                                                '📄'
+                                            }</span>
+                                            <span class="text-xs px-2 py-0.5 rounded ${
+                                                log.source === 'upload' ? 'bg-blue-500/20 text-blue-400' :
+                                                log.source === 'quickture' ? 'bg-purple-500/20 text-purple-400' :
+                                                log.source === 'nasa' ? 'bg-red-500/20 text-red-400' :
+                                                log.source === 'getty' ? 'bg-orange-500/20 text-orange-400' :
+                                                'bg-gray-500/20 text-gray-400'
+                                            }">${log.source || 'manual'}</span>
+                                            ${log.hasFile ? `<span class="text-xs text-gray-500">${formatFileSize(log.sizeBytes)}</span>` : ''}
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs text-gray-500">${log.clipCount || 0} clips</span>
+                                            ${log.hasFile && log.gcsPath ? `
+                                                <button onclick="viewArchiveFile('${log.id}')" class="text-xs bg-[#1a1a1a] border border-[#333] px-2 py-1 rounded hover:border-purple-600 transition">
+                                                    View
+                                                </button>
+                                            ` : ''}
+                                        </div>
                                     </div>
+                                    ${log.sourceName ? `<p class="text-sm font-medium text-white mb-2">${log.sourceName}</p>` : ''}
                                     ${log.clips?.slice(0, 5).map(clip => `
                                         <div class="text-sm py-2 border-t border-[#222] first:border-0">
                                             <span class="text-gray-400">${clip.timecodeIn || ''}</span>
                                             <span class="text-white ml-2">${clip.description || clip.filename}</span>
+                                            ${clip.keywords?.length > 0 ? `
+                                                <div class="mt-1">
+                                                    ${clip.keywords.slice(0, 3).map(k => `<span class="text-[10px] bg-[#222] text-gray-400 px-1.5 py-0.5 rounded mr-1">${k}</span>`).join('')}
+                                                </div>
+                                            ` : ''}
                                         </div>
                                     `).join('')}
                                     ${(log.clips?.length || 0) > 5 ? `<p class="text-xs text-gray-500 mt-2">+ ${log.clips.length - 5} more clips</p>` : ''}
@@ -1945,6 +1979,218 @@
                     <button onclick="closeModal()" class="w-full mt-4 bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 rounded-lg transition">
                         Close
                     </button>
+                </div>
+            `);
+        }
+
+        // =============================================================================
+        // ARCHIVE FILE UPLOAD
+        // =============================================================================
+        function formatFileSize(bytes) {
+            if (!bytes) return '';
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+        }
+
+        function showUploadArchiveModal() {
+            if (!state.selectedEpisode) {
+                showModal('Error', '<p class="text-red-400">Please select an episode first</p>');
+                return;
+            }
+
+            showModal('Upload Archive Files', `
+                <form id="archive-upload-form" onsubmit="uploadArchiveFile(event)">
+                    <div class="space-y-4">
+                        <p class="text-sm text-gray-500">Upload documents, video, audio, or image files to the archive.</p>
+
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">File</label>
+                            <input type="file" id="archive-file" required
+                                accept="video/*,audio/*,image/*,.pdf,.doc,.docx,.txt,.csv,.xlsx,.xls"
+                                class="w-full bg-[#0a0a0a] border border-[#333] rounded-lg p-3 text-white focus:outline-none focus:border-purple-600 transition file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:bg-purple-600 file:text-white hover:file:bg-purple-700">
+                            <p class="text-xs text-gray-600 mt-1">Supported: Video (MP4, MOV, MXF), Audio (MP3, WAV), Images (JPG, PNG), Documents (PDF, DOC)</p>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Source Type</label>
+                            <select id="archive-source-type"
+                                class="w-full bg-[#0a0a0a] border border-[#333] rounded-lg p-3 text-white focus:outline-none focus:border-purple-600 transition">
+                                <option value="upload">Direct Upload</option>
+                                <option value="nasa">NASA Archive</option>
+                                <option value="getty">Getty Images</option>
+                                <option value="pond5">Pond5</option>
+                                <option value="interview">Interview Recording</option>
+                                <option value="b-roll">B-Roll Footage</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Description</label>
+                            <textarea id="archive-description" rows="2"
+                                class="w-full bg-[#0a0a0a] border border-[#333] rounded-lg p-3 text-white focus:outline-none focus:border-purple-600 transition"
+                                placeholder="Brief description of the content..."></textarea>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Keywords (comma-separated)</label>
+                            <input type="text" id="archive-keywords"
+                                class="w-full bg-[#0a0a0a] border border-[#333] rounded-lg p-3 text-white focus:outline-none focus:border-purple-600 transition"
+                                placeholder="e.g., apollo, launch, nasa, 1969">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Technical Notes</label>
+                            <input type="text" id="archive-technical-notes"
+                                class="w-full bg-[#0a0a0a] border border-[#333] rounded-lg p-3 text-white focus:outline-none focus:border-purple-600 transition"
+                                placeholder="e.g., 4K, 24fps, ProRes 422">
+                        </div>
+
+                        <div id="upload-progress" class="hidden">
+                            <div class="bg-[#222] rounded-full h-2 overflow-hidden">
+                                <div id="upload-progress-bar" class="bg-purple-600 h-full transition-all duration-300" style="width: 0%"></div>
+                            </div>
+                            <p id="upload-status" class="text-xs text-gray-500 mt-1 text-center">Uploading...</p>
+                        </div>
+
+                        <button type="submit" id="upload-submit-btn" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-lg transition">
+                            📁 Upload to Archive
+                        </button>
+                    </div>
+                </form>
+            `);
+        }
+
+        async function uploadArchiveFile(event) {
+            event.preventDefault();
+
+            const fileInput = document.getElementById('archive-file');
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            const progressDiv = document.getElementById('upload-progress');
+            const progressBar = document.getElementById('upload-progress-bar');
+            const statusText = document.getElementById('upload-status');
+            const submitBtn = document.getElementById('upload-submit-btn');
+
+            // Show progress
+            progressDiv.classList.remove('hidden');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Uploading...';
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('episodeId', state.selectedEpisode);
+            formData.append('projectId', state.selectedProject);
+            formData.append('sourceType', document.getElementById('archive-source-type').value);
+            formData.append('description', document.getElementById('archive-description').value);
+            formData.append('keywords', document.getElementById('archive-keywords').value);
+            formData.append('technicalNotes', document.getElementById('archive-technical-notes').value);
+
+            try {
+                // Use XMLHttpRequest for progress tracking
+                const xhr = new XMLHttpRequest();
+
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable) {
+                        const percent = Math.round((e.loaded / e.total) * 100);
+                        progressBar.style.width = percent + '%';
+                        statusText.textContent = `Uploading... ${percent}% (${formatFileSize(e.loaded)} / ${formatFileSize(e.total)})`;
+                    }
+                });
+
+                xhr.addEventListener('load', async () => {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        const result = JSON.parse(xhr.responseText);
+                        await loadEpisodeWorkspace(state.selectedEpisode);
+                        closeModal();
+                        showModal('Upload Complete', `
+                            <div class="text-center py-4">
+                                <div class="text-4xl mb-4">${
+                                    result.category === 'video' ? '🎬' :
+                                    result.category === 'audio' ? '🎵' :
+                                    result.category === 'image' ? '🖼️' : '📄'
+                                }</div>
+                                <p class="text-white font-bold">${result.filename}</p>
+                                <p class="text-sm text-gray-500 mt-2">${formatFileSize(result.size)} uploaded successfully</p>
+                            </div>
+                        `);
+                        setTimeout(() => { closeModal(); render(); }, 2000);
+                    } else {
+                        const error = JSON.parse(xhr.responseText);
+                        throw new Error(error.error || 'Upload failed');
+                    }
+                });
+
+                xhr.addEventListener('error', () => {
+                    throw new Error('Network error during upload');
+                });
+
+                xhr.open('POST', '/api/archive-logs/upload');
+                xhr.send(formData);
+
+            } catch (error) {
+                progressDiv.classList.add('hidden');
+                submitBtn.disabled = false;
+                submitBtn.textContent = '📁 Upload to Archive';
+                showModal('Upload Error', `<p class="text-red-400">${error.message}</p>`);
+            }
+        }
+
+        async function viewArchiveFile(logId) {
+            const log = state.episodeWorkspace?.archiveLogs?.find(l => l.id === logId);
+            if (!log) return;
+
+            showModal(log.sourceName || log.filename || 'Archive File', `
+                <div class="space-y-4">
+                    <div class="flex items-center gap-3">
+                        <span class="text-3xl">${
+                            log.fileCategory === 'video' ? '🎬' :
+                            log.fileCategory === 'audio' ? '🎵' :
+                            log.fileCategory === 'image' ? '🖼️' : '📄'
+                        }</span>
+                        <div>
+                            <p class="font-bold text-white">${log.filename || log.sourceName}</p>
+                            <p class="text-xs text-gray-500">${log.mimeType} • ${formatFileSize(log.sizeBytes)}</p>
+                        </div>
+                    </div>
+
+                    ${log.clips?.[0]?.description ? `
+                        <div class="bg-[#0a0a0a] rounded-lg p-4">
+                            <p class="text-xs text-gray-500 uppercase mb-1">Description</p>
+                            <p class="text-white">${log.clips[0].description}</p>
+                        </div>
+                    ` : ''}
+
+                    ${log.clips?.[0]?.keywords?.length > 0 ? `
+                        <div>
+                            <p class="text-xs text-gray-500 uppercase mb-2">Keywords</p>
+                            <div class="flex flex-wrap gap-1">
+                                ${log.clips[0].keywords.map(k => `<span class="text-xs bg-[#222] text-gray-300 px-2 py-1 rounded">${k}</span>`).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    ${log.clips?.[0]?.technicalNotes ? `
+                        <div class="bg-[#0a0a0a] rounded-lg p-4">
+                            <p class="text-xs text-gray-500 uppercase mb-1">Technical Notes</p>
+                            <p class="text-white font-mono text-sm">${log.clips[0].technicalNotes}</p>
+                        </div>
+                    ` : ''}
+
+                    <div class="text-xs text-gray-500">
+                        <p>Uploaded: ${log.uploadedAt ? new Date(log.uploadedAt).toLocaleString() : 'Unknown'}</p>
+                        <p>Source: ${log.source}</p>
+                    </div>
+
+                    ${log.gcsPath ? `
+                        <a href="/api/download/${log.gcsPath}"
+                            target="_blank"
+                            class="block w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-lg transition text-center">
+                            📥 Download File
+                        </a>
+                    ` : ''}
                 </div>
             `);
         }
