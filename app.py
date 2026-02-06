@@ -4221,7 +4221,7 @@ def api_health():
 
 @app.route("/api/search-archive", methods=["POST"])
 def api_search_archive():
-    """Archive search via AI prompt → JSON array of clips."""
+    """Archive search via AI prompt → JSON array of clips with real thumbnails."""
     try:
         data = request.get_json()
         query = data.get("query", "")
@@ -4239,6 +4239,7 @@ Return a JSON array of archive clips. Each clip must have:
 - category: string (news/documentary/raw_footage/interview/b-roll)
 - year_range: string
 - quality: string (HD/SD/4K/Film)
+- search_term: string (a 2-4 word image search term for finding a real thumbnail of this clip)
 
 Provide 5-8 relevant results. Return ONLY the JSON array."""
 
@@ -4248,7 +4249,86 @@ Provide 5-8 relevant results. Return ONLY the JSON array."""
             result = json.loads(response_text.strip().removeprefix("```json").removesuffix("```").strip())
         except (json.JSONDecodeError, ValueError):
             result = []
+
+        # Fetch real thumbnails from NASA Images API for each result
+        for clip in result:
+            search_term = clip.pop("search_term", clip.get("title", query))
+            try:
+                nasa_resp = requests.get(
+                    "https://images-api.nasa.gov/search",
+                    params={"q": search_term, "media_type": "image", "page_size": 1},
+                    timeout=5
+                )
+                if nasa_resp.status_code == 200:
+                    items = nasa_resp.json().get("collection", {}).get("items", [])
+                    if items and items[0].get("links"):
+                        clip["thumbnail_url"] = items[0]["links"][0].get("href", "")
+            except Exception:
+                pass
+            # If NASA API didn't return an image, try with the main query
+            if not clip.get("thumbnail_url"):
+                try:
+                    nasa_resp2 = requests.get(
+                        "https://images-api.nasa.gov/search",
+                        params={"q": query, "media_type": "image", "page_size": 1},
+                        timeout=5
+                    )
+                    if nasa_resp2.status_code == 200:
+                        items2 = nasa_resp2.json().get("collection", {}).get("items", [])
+                        if items2 and items2[0].get("links"):
+                            clip["thumbnail_url"] = items2[0]["links"][0].get("href", "")
+                except Exception:
+                    pass
+
         return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/nasa/search", methods=["GET"])
+def api_nasa_search():
+    """Search NASA Images API and return real image/video results with thumbnails."""
+    query = request.args.get("q", "")
+    media_type = request.args.get("media_type", "image")
+    page = request.args.get("page", "1")
+    page_size = request.args.get("page_size", "20")
+    if not query:
+        return jsonify({"items": [], "total": 0})
+    try:
+        resp = requests.get(
+            "https://images-api.nasa.gov/search",
+            params={
+                "q": query,
+                "media_type": media_type,
+                "page": page,
+                "page_size": page_size,
+            },
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return jsonify({"error": f"NASA API returned {resp.status_code}"}), 502
+
+        collection = resp.json().get("collection", {})
+        items = []
+        for item in collection.get("items", []):
+            data = item.get("data", [{}])[0]
+            links = item.get("links", [])
+            thumbnail = links[0].get("href", "") if links else ""
+            nasa_id = data.get("nasa_id", "")
+            items.append({
+                "nasa_id": nasa_id,
+                "title": data.get("title", ""),
+                "description": (data.get("description", "") or "")[:300],
+                "date_created": data.get("date_created", ""),
+                "media_type": data.get("media_type", "image"),
+                "center": data.get("center", ""),
+                "keywords": (data.get("keywords", []) or [])[:5],
+                "thumbnail_url": thumbnail,
+                "href": item.get("href", ""),
+            })
+
+        total_hits = collection.get("metadata", {}).get("total_hits", len(items))
+        return jsonify({"items": items, "total": total_hits})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -4676,6 +4756,27 @@ def api_generate_broll():
         prompt = data.get("prompt", "")
         return jsonify({
             "videoUri": f"https://storage.googleapis.com/{STORAGE_BUCKET}/generated/placeholder-broll.mp4"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/gcs/serve", methods=["GET"])
+def api_gcs_serve():
+    """Proxy a file from GCS so the frontend can display uploaded images/videos."""
+    gcs_path = request.args.get("path", "")
+    if not gcs_path:
+        return jsonify({"error": "Missing path parameter"}), 400
+    try:
+        bucket = storage_client.bucket(STORAGE_BUCKET)
+        blob = bucket.blob(gcs_path)
+        if not blob.exists():
+            return jsonify({"error": "File not found"}), 404
+        content = blob.download_as_bytes()
+        content_type = blob.content_type or "application/octet-stream"
+        from flask import Response
+        return Response(content, content_type=content_type, headers={
+            "Cache-Control": "public, max-age=86400"
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
