@@ -25,7 +25,7 @@ app = Flask(__name__, static_folder='static', static_url_path='/static')
 CORS(app, origins=[
     "http://localhost:3000",
     "http://localhost:5173",
-    "https://*.run.app",
+    r"https://.*\.run\.app",
 ])
 
 # Configuration
