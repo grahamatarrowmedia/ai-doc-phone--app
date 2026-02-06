@@ -74,6 +74,41 @@ COLLECTIONS = {
     'users': f'{COLLECTION_PREFIX}doc_users',
 }
 
+SEED_USERS = [
+    {
+        'username': 'Felix',
+        'role': 'producer',
+        'avatar': 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix',
+        'bio': 'Executive Producer. Focus on Creative Direction & Final Approval.',
+        'customInstructions': 'Tone: High-end documentary, Investigative, Cinematic.',
+        'gcpProjectId': 'aim-prod-01',
+    },
+    {
+        'username': 'Sarah',
+        'role': 'editor',
+        'avatar': 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sarah',
+        'bio': 'Senior Editor. Focus on Timeline, Pacing, and Visuals.',
+        'customInstructions': 'Tone: Fast-paced, rythmic, engaging edits.',
+        'gcpProjectId': 'aim-prod-01',
+    },
+    {
+        'username': 'Marcus',
+        'role': 'researcher',
+        'avatar': 'https://api.dicebear.com/7.x/avataaars/svg?seed=Marcus',
+        'bio': 'Lead Researcher. Focus on Fact-Checking & Deep Research.',
+        'customInstructions': 'Tone: Academic, precise, highly cited.',
+        'gcpProjectId': 'aim-prod-01',
+    },
+    {
+        'username': 'Elena',
+        'role': 'legal',
+        'avatar': 'https://api.dicebear.com/7.x/avataaars/svg?seed=Elena',
+        'bio': 'Legal Counsel. Focus on Clearance & Compliance.',
+        'customInstructions': 'Tone: Formal, compliant, risk-averse.',
+        'gcpProjectId': 'aim-prod-01',
+    },
+]
+
 # ============== Production Factory Constants ==============
 
 # Episode workflow phases
@@ -4455,47 +4490,272 @@ def seed_users():
     if existing:
         return jsonify({"message": "Users already exist"})
 
-    seed_data = [
-        {
-            'username': 'Felix',
-            'role': 'producer',
-            'avatar': 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix',
-            'bio': 'Executive Producer. Focus on Creative Direction & Final Approval.',
-            'customInstructions': 'Tone: High-end documentary, Investigative, Cinematic.',
-            'gcpProjectId': 'aim-prod-01',
-        },
-        {
-            'username': 'Sarah',
-            'role': 'editor',
-            'avatar': 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sarah',
-            'bio': 'Senior Editor. Focus on Timeline, Pacing, and Visuals.',
-            'customInstructions': 'Tone: Fast-paced, rythmic, engaging edits.',
-            'gcpProjectId': 'aim-prod-01',
-        },
-        {
-            'username': 'Marcus',
-            'role': 'researcher',
-            'avatar': 'https://api.dicebear.com/7.x/avataaars/svg?seed=Marcus',
-            'bio': 'Lead Researcher. Focus on Fact-Checking & Deep Research.',
-            'customInstructions': 'Tone: Academic, precise, highly cited.',
-            'gcpProjectId': 'aim-prod-01',
-        },
-        {
-            'username': 'Elena',
-            'role': 'legal',
-            'avatar': 'https://api.dicebear.com/7.x/avataaars/svg?seed=Elena',
-            'bio': 'Legal Counsel. Focus on Clearance & Compliance.',
-            'customInstructions': 'Tone: Formal, compliant, risk-averse.',
-            'gcpProjectId': 'aim-prod-01',
-        },
-    ]
-
     created = []
-    for user_data in seed_data:
-        user = create_doc('users', user_data)
+    for user_data in SEED_USERS:
+        user = create_doc('users', dict(user_data))
         created.append(user)
 
     return jsonify(created), 201
+
+
+# ============== Missing Frontend Endpoints ==============
+
+
+@app.route("/api/analyze-document", methods=["POST"])
+def api_analyze_document():
+    """Analyze uploaded document content → structured summary."""
+    try:
+        data = request.get_json()
+        content = data.get("content", "")[:15000]
+        file_name = data.get("fileName", "unknown")
+        file_type = data.get("fileType", "text/plain")
+
+        if "csv" in file_type.lower() or file_name.lower().endswith(".csv"):
+            prompt = f"""Analyze this CSV data from file "{file_name}":
+
+"{content}"
+
+Return ONLY valid JSON with:
+- title: string (descriptive title for the data)
+- summary: string (200-300 word overview of what the data contains)
+- key_topics: array of strings (5-8 topics covered)
+- key_facts: array of strings (5-8 notable facts or data points)
+- timeline_events: array of objects with date and description (extract any chronological events found in the data)"""
+        else:
+            prompt = f"""Analyze this document "{file_name}" (type: {file_type}):
+
+"{content}"
+
+Return ONLY valid JSON with:
+- title: string (descriptive title)
+- summary: string (200-300 word overview)
+- key_topics: array of strings (5-8 topics)
+- key_facts: array of strings (5-8 notable facts)
+- timeline_events: array (empty array for non-temporal documents)"""
+
+        response_text = generate_ai_response(prompt)
+        try:
+            import json
+            analysis = json.loads(response_text.strip().removeprefix("```json").removesuffix("```").strip())
+        except (json.JSONDecodeError, ValueError):
+            analysis = {"title": file_name, "summary": response_text, "key_topics": [], "key_facts": [], "timeline_events": []}
+
+        return jsonify({
+            "status": "analyzed",
+            "title": analysis.get("title", file_name),
+            "summary": analysis.get("summary", ""),
+            "key_topics": analysis.get("key_topics", []),
+            "key_facts": analysis.get("key_facts", []),
+            "timeline_events": analysis.get("timeline_events", [])
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/series-structure", methods=["POST"])
+def api_series_structure():
+    """Generate documentary series structure from premise."""
+    try:
+        data = request.get_json()
+        premise = data.get("premise", "")
+        episodes_count = data.get("episodesCount", 3)
+
+        prompt = f"""You are a senior documentary series architect. Design a {episodes_count}-episode documentary series based on this premise:
+
+"{premise}"
+
+Return ONLY valid JSON with:
+- episodes: array of {episodes_count} objects, each with:
+  - title: string (compelling episode title)
+  - research_focus: string (what research is needed for this episode)
+  - suggested_engine: string (one of: google_deep_research, academic_search, investigative)
+- themes: array of strings (3-5 overarching themes that connect the episodes)"""
+
+        response_text = generate_ai_response(prompt)
+        try:
+            import json
+            result = json.loads(response_text.strip().removeprefix("```json").removesuffix("```").strip())
+        except (json.JSONDecodeError, ValueError):
+            result = {"episodes": [], "themes": []}
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/generate-script", methods=["POST"])
+def api_generate_script():
+    """Multi-agent script generation for a documentary."""
+    try:
+        data = request.get_json()
+        title = data.get("title", "")
+        description = data.get("description", "")
+        duration = data.get("duration", 30)
+        reference_style = data.get("referenceStyle", "cinematic")
+        research_context = data.get("researchContext", [])
+        archive_context = data.get("archiveContext", [])
+
+        research_summary = "\n".join(
+            f"- {r}" if isinstance(r, str) else f"- {r.get('title', '')}: {r.get('summary', '')}"
+            for r in research_context
+        ) if research_context else "No research context provided."
+
+        archive_summary = "\n".join(
+            f"- {a}" if isinstance(a, str) else f"- {a.get('title', '')}: {a.get('visual_description', '')}"
+            for a in archive_context
+        ) if archive_context else "No archive footage context provided."
+
+        prompt = f"""You are a team of documentary scriptwriters. Generate a detailed script for:
+
+Title: "{title}"
+Description: "{description}"
+Target Duration: {duration} minutes
+Style Reference: {reference_style}
+
+Research Context:
+{research_summary}
+
+Available Archive Footage:
+{archive_summary}
+
+Return ONLY a valid JSON array where each element is an act/segment with:
+- title: string (act/segment title)
+- scenes: array of scene objects, each with:
+  - title: string (scene title)
+  - beats: array of beat objects, each with:
+    - type: string (narration/interview/b-roll/archival/transition)
+    - content: string (the actual script text or description)
+    - speaker: string (narrator name, interviewee, or empty)
+    - duration_seconds: number (estimated duration for this beat)
+
+Aim for 3-5 acts with 2-4 scenes each. Total duration should approximate {duration} minutes."""
+
+        response_text = generate_ai_response(prompt)
+        try:
+            import json
+            result = json.loads(response_text.strip().removeprefix("```json").removesuffix("```").strip())
+        except (json.JSONDecodeError, ValueError):
+            result = []
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/interview-plan", methods=["POST"])
+def api_interview_plan():
+    """Generate interview strategy for a scene/topic."""
+    try:
+        data = request.get_json()
+        scene_context = data.get("sceneContext", "")
+        topic = data.get("topic", "")
+
+        prompt = f"""You are an expert documentary interview strategist. Create an interview plan for:
+
+Scene Context: "{scene_context}"
+Topic: "{topic}"
+
+Return ONLY valid JSON with:
+- ideal_soundbite: string (the ideal 1-2 sentence soundbite you want the interviewee to deliver)
+- questions: array of strings (8-12 interview questions, ordered from warm-up to probing, designed to naturally elicit the ideal soundbite)"""
+
+        response_text = generate_ai_response(prompt)
+        try:
+            import json
+            result = json.loads(response_text.strip().removeprefix("```json").removesuffix("```").strip())
+        except (json.JSONDecodeError, ValueError):
+            result = {"ideal_soundbite": "", "questions": []}
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/generate-broll", methods=["POST"])
+def api_generate_broll():
+    """Placeholder for B-roll video generation (Veo not yet integrated)."""
+    try:
+        data = request.get_json()
+        prompt = data.get("prompt", "")
+        return jsonify({
+            "videoUri": f"https://storage.googleapis.com/{STORAGE_BUCKET}/generated/placeholder-broll.mp4"
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/gcs/buckets", methods=["GET"])
+def api_gcs_buckets():
+    """List GCS buckets with metadata."""
+    try:
+        buckets = []
+        for bucket in storage_client.list_buckets():
+            blobs = list(bucket.list_blobs(max_results=1000))
+            file_count = len(blobs)
+            size_bytes = sum(b.size or 0 for b in blobs)
+            buckets.append({
+                "name": bucket.name,
+                "region": bucket.location or "us-central1",
+                "storageClass": bucket.storage_class or "STANDARD",
+                "fileCount": file_count,
+                "sizeGb": round(size_bytes / (1024 ** 3), 2)
+            })
+        return jsonify(buckets)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/vertex/models", methods=["GET"])
+def api_vertex_models():
+    """Curated list of Vertex AI models in use."""
+    try:
+        models = [
+            {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "version": "v2.0", "status": "active", "latencyMs": 450, "callsPerMin": 60},
+            {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "version": "v2.5", "status": "active", "latencyMs": 1200, "callsPerMin": 30},
+            {"id": "imagen-3", "name": "Imagen 3", "version": "v3.0", "status": "active", "latencyMs": 2500, "callsPerMin": 15},
+            {"id": "veo-2", "name": "Veo 2", "version": "v2.0", "status": "pending", "latencyMs": 8000, "callsPerMin": 5},
+            {"id": "text-embedding-005", "name": "Text Embedding", "version": "v005", "status": "active", "latencyMs": 120, "callsPerMin": 120},
+        ]
+        return jsonify(models)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/vertex/deploy", methods=["POST"])
+def api_vertex_deploy():
+    """Placeholder for model deployment version bump."""
+    try:
+        data = request.get_json()
+        model_id = data.get("modelId", "")
+        current_version = data.get("currentVersion", "v1.0")
+
+        # Increment version: v2.0 → v2.1, v3.5 → v3.6
+        parts = current_version.lstrip("v").split(".")
+        major = parts[0] if parts else "1"
+        minor = int(parts[1]) + 1 if len(parts) > 1 else 1
+        new_version = f"v{major}.{minor}"
+
+        return jsonify({"newVersion": new_version})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/gcs/purge-cache", methods=["POST"])
+def api_gcs_purge_cache():
+    """Placeholder for GCS cache purge."""
+    try:
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ============== Auto-seed users on startup ==============
+try:
+    if not list(db.collection(COLLECTIONS['users']).limit(1).stream()):
+        for _ud in SEED_USERS:
+            create_doc('users', dict(_ud))
+        print(f"[startup] Seeded {len(SEED_USERS)} default users into {COLLECTIONS['users']}")
+    else:
+        print(f"[startup] Users already exist in {COLLECTIONS['users']}")
+except Exception as _e:
+    print(f"[startup] Could not auto-seed users: {_e}")
 
 
 if __name__ == "__main__":
