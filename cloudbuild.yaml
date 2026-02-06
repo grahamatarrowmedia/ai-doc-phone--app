@@ -61,6 +61,7 @@ steps:
       - build
 
   # Step 4: Capture current serving revision for rollback reference
+  #         Also records whether the service exists (for first-deploy handling)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     id: 'capture-current-revision'
     entrypoint: 'bash'
@@ -68,14 +69,19 @@ steps:
       - '-c'
       - |
         SERVICE=$(cat /workspace/service.txt)
-        CURRENT=$(gcloud run services describe "$${SERVICE}" \
-          --region=us-central1 --format='value(status.traffic[0].revisionName)' 2>/dev/null || echo "none")
-        echo "$${CURRENT}" > /workspace/previous-revision.txt
-        echo "=== Current serving revision: $${CURRENT} ==="
+        if gcloud run services describe "$${SERVICE}" \
+             --region=us-central1 --format='value(status.traffic[0].revisionName)' > /workspace/previous-revision.txt 2>/dev/null; then
+          echo "exists" > /workspace/service-exists.txt
+          echo "=== Current serving revision: $(cat /workspace/previous-revision.txt) ==="
+        else
+          echo "none" > /workspace/previous-revision.txt
+          echo "new" > /workspace/service-exists.txt
+          echo "=== Service does not exist yet — first deploy ==="
+        fi
     waitFor:
       - set-env
 
-  # Step 5: Deploy new revision with 0% traffic, tagged "green"
+  # Step 5: Deploy new revision with 0% traffic (or full traffic on first deploy)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     id: 'deploy-green'
     entrypoint: 'bash'
@@ -86,6 +92,13 @@ steps:
         BUCKET=$(cat /workspace/bucket.txt)
         ENV=$(cat /workspace/env.txt)
 
+        GREEN_FLAGS=""
+        if [ "$(cat /workspace/service-exists.txt)" = "exists" ]; then
+          GREEN_FLAGS="--no-traffic --tag green"
+        else
+          echo "=== First deploy — skipping --no-traffic (not supported for new services) ==="
+        fi
+
         gcloud run deploy "$${SERVICE}" \
           --image "us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run/$${SERVICE}:$COMMIT_SHA" \
           --region us-central1 \
@@ -95,13 +108,12 @@ steps:
           --memory 2Gi \
           --timeout 3600 \
           --cpu 2 \
-          --no-traffic \
-          --tag green
+          $${GREEN_FLAGS}
     waitFor:
       - push
       - capture-current-revision
 
-  # Step 6: Smoke-test the green revision via its tagged URL
+  # Step 6: Smoke-test the green revision (or the live URL on first deploy)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     id: 'smoke-test'
     entrypoint: 'bash'
@@ -110,16 +122,23 @@ steps:
       - |
         SERVICE=$(cat /workspace/service.txt)
 
-        # Get the green tag URL from the service description
-        GREEN_URL=$(gcloud run services describe "$${SERVICE}" \
-          --region=us-central1 \
-          --format='value(status.traffic.url)' | tr ',' '\n' | grep 'green---' | head -1)
+        if [ "$(cat /workspace/service-exists.txt)" = "exists" ]; then
+          # Get the green tag URL from the service description
+          GREEN_URL=$(gcloud run services describe "$${SERVICE}" \
+            --region=us-central1 \
+            --format='value(status.traffic.url)' | tr ',' '\n' | grep 'green---' | head -1)
+        else
+          # First deploy — no green tag, use the main service URL
+          GREEN_URL=$(gcloud run services describe "$${SERVICE}" \
+            --region=us-central1 \
+            --format='value(status.url)')
+        fi
 
         if [ -z "$${GREEN_URL}" ]; then
-          echo "ERROR: Could not find green tag URL"
+          echo "ERROR: Could not find service URL"
           exit 1
         fi
-        echo "=== Green URL: $${GREEN_URL} ==="
+        echo "=== Test URL: $${GREEN_URL} ==="
 
         # Test 1: /health endpoint
         echo "=== Testing /health ==="
@@ -144,6 +163,7 @@ steps:
       - deploy-green
 
   # Step 7: Promote green revision to 100% traffic, then clean up tag
+  #         (skipped on first deploy — already serving 100%)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     id: 'promote-green'
     entrypoint: 'bash'
@@ -151,6 +171,11 @@ steps:
       - '-c'
       - |
         SERVICE=$(cat /workspace/service.txt)
+
+        if [ "$(cat /workspace/service-exists.txt)" != "exists" ]; then
+          echo "=== First deploy — already serving 100% traffic, nothing to promote ==="
+          exit 0
+        fi
 
         echo "=== Promoting green revision to 100% traffic ==="
         gcloud run services update-traffic "$${SERVICE}" \
