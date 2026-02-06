@@ -104,6 +104,7 @@ steps:
           --region us-central1 \
           --platform managed \
           --allow-unauthenticated \
+          --update-annotations=run.googleapis.com/invoker-iam-disabled=true \
           --set-env-vars "GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=us-central1,STORAGE_BUCKET=$${BUCKET},APP_ENV=$${ENV},APP_VERSION=1.1.0-$SHORT_SHA" \
           --memory 2Gi \
           --timeout 3600 \
