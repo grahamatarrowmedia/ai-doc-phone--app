@@ -71,6 +71,7 @@ COLLECTIONS = {
     'script_versions': f'{COLLECTION_PREFIX}doc_script_versions',
     'compliance_items': f'{COLLECTION_PREFIX}doc_compliance_items',
     'agent_tasks': f'{COLLECTION_PREFIX}doc_agent_tasks',
+    'users': f'{COLLECTION_PREFIX}doc_users',
 }
 
 # ============== Production Factory Constants ==============
@@ -4428,6 +4429,73 @@ def api_chat():
         return jsonify({"response": response_text})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ============== User Profile Endpoints ==============
+
+@app.route("/api/users", methods=["GET"])
+def get_users():
+    """Get all user profiles."""
+    users = get_all_docs('users')
+    return jsonify(users)
+
+
+@app.route("/api/users/<user_id>", methods=["PUT"])
+def update_user(user_id):
+    """Update a user profile."""
+    data = request.get_json()
+    user = update_doc('users', user_id, data)
+    return jsonify(user)
+
+
+@app.route("/api/users/seed", methods=["POST"])
+def seed_users():
+    """Seed initial user profiles (idempotent — only creates if collection is empty)."""
+    existing = list(db.collection(COLLECTIONS['users']).limit(1).stream())
+    if existing:
+        return jsonify({"message": "Users already exist"})
+
+    seed_data = [
+        {
+            'username': 'Felix',
+            'role': 'producer',
+            'avatar': 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix',
+            'bio': 'Executive Producer. Focus on Creative Direction & Final Approval.',
+            'customInstructions': 'Tone: High-end documentary, Investigative, Cinematic.',
+            'gcpProjectId': 'aim-prod-01',
+        },
+        {
+            'username': 'Sarah',
+            'role': 'editor',
+            'avatar': 'https://api.dicebear.com/7.x/avataaars/svg?seed=Sarah',
+            'bio': 'Senior Editor. Focus on Timeline, Pacing, and Visuals.',
+            'customInstructions': 'Tone: Fast-paced, rythmic, engaging edits.',
+            'gcpProjectId': 'aim-prod-01',
+        },
+        {
+            'username': 'Marcus',
+            'role': 'researcher',
+            'avatar': 'https://api.dicebear.com/7.x/avataaars/svg?seed=Marcus',
+            'bio': 'Lead Researcher. Focus on Fact-Checking & Deep Research.',
+            'customInstructions': 'Tone: Academic, precise, highly cited.',
+            'gcpProjectId': 'aim-prod-01',
+        },
+        {
+            'username': 'Elena',
+            'role': 'legal',
+            'avatar': 'https://api.dicebear.com/7.x/avataaars/svg?seed=Elena',
+            'bio': 'Legal Counsel. Focus on Clearance & Compliance.',
+            'customInstructions': 'Tone: Formal, compliant, risk-averse.',
+            'gcpProjectId': 'aim-prod-01',
+        },
+    ]
+
+    created = []
+    for user_data in seed_data:
+        user = create_doc('users', user_data)
+        created.append(user)
+
+    return jsonify(created), 201
 
 
 if __name__ == "__main__":
