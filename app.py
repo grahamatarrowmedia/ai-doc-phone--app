@@ -4702,10 +4702,17 @@ Return ONLY a valid JSON array where each element is an act/segment with:
 - scenes: array of scene objects, each with:
   - title: string (scene title)
   - beats: array of beat objects, each with:
-    - type: string (narration/interview/b-roll/archival/transition)
+    - type: string (MUST be one of: voice_over, expert, archive, ai_visual)
     - content: string (the actual script text or description)
     - speaker: string (narrator name, interviewee, or empty)
+    - topic: string (for expert beats: the interview topic)
     - duration_seconds: number (estimated duration for this beat)
+
+Use these beat types:
+- voice_over: for narration, voice-over text
+- expert: for interview soundbites, expert commentary
+- archive: for B-roll footage, archival clips, stock footage descriptions
+- ai_visual: for AI-generated visuals, transitions, title cards, graphics
 
 Aim for 3-5 acts with 2-4 scenes each. Total duration should approximate {duration} minutes."""
 
@@ -4968,7 +4975,8 @@ def proxy_elevenlabs_voices():
 
 @app.route("/api/elevenlabs/generate", methods=["POST"])
 def proxy_elevenlabs_generate():
-    """Proxy ElevenLabs TTS through backend so API key stays server-side."""
+    """Proxy ElevenLabs TTS through backend so API key stays server-side.
+    Falls back to Google Cloud TTS for demo voices or when no key is configured."""
     try:
         data = request.get_json()
         user_id = data.get("userId")
@@ -4977,39 +4985,88 @@ def proxy_elevenlabs_generate():
         settings = data.get("settings", {})
         if not user_id or not voice_id:
             return jsonify({"error": "userId and voiceId required"}), 400
+
+        # Strip HTML/SSML tags from text for clean TTS input
+        import re, uuid
+        clean_text = re.sub(r'<[^>]*>', '', text).strip()
+        # Strip ElevenLabs intonation tags like [slowly], [pause], etc.
+        clean_text = re.sub(r'\[(?:slowly|loudly|whisper|emotional|pause|excited|serious|laugh)\]', '', clean_text, flags=re.IGNORECASE).strip()
+        if not clean_text:
+            return jsonify({"error": "No text to synthesize"}), 400
+
         user_doc = get_doc('users', user_id)
-        if not user_doc or not user_doc.get('elevenLabsApiKey'):
-            return jsonify({"error": "No ElevenLabs API key configured"}), 400
-        api_key = user_doc['elevenLabsApiKey']
-        resp = requests.post(
-            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-            headers={"xi-api-key": api_key, "Content-Type": "application/json"},
-            json={
-                "text": text,
-                "model_id": "eleven_multilingual_v2",
-                "voice_settings": {
-                    "stability": settings.get("stability", 0.5),
-                    "similarity_boost": settings.get("similarity_boost", 0.75),
-                    "style": settings.get("style", 0.0),
-                    "use_speaker_boost": settings.get("use_speaker_boost", True)
-                }
-            },
-            timeout=30
+        use_elevenlabs = (
+            user_doc
+            and user_doc.get('elevenLabsApiKey')
+            and not voice_id.startswith('demo-')
         )
-        if not resp.ok:
-            error_detail = resp.json() if resp.headers.get('content-type', '').startswith('application/json') else {}
-            return jsonify({"error": error_detail.get("detail", {}).get("message", "Generation failed")}), 500
+
+        if use_elevenlabs:
+            # Use ElevenLabs API
+            api_key = user_doc['elevenLabsApiKey']
+            resp = requests.post(
+                f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+                headers={"xi-api-key": api_key, "Content-Type": "application/json"},
+                json={
+                    "text": clean_text,
+                    "model_id": "eleven_multilingual_v2",
+                    "voice_settings": {
+                        "stability": settings.get("stability", 0.5),
+                        "similarity_boost": settings.get("similarity_boost", 0.75),
+                        "style": settings.get("style", 0.0),
+                        "use_speaker_boost": settings.get("use_speaker_boost", True)
+                    }
+                },
+                timeout=30
+            )
+            if not resp.ok:
+                error_detail = resp.json() if resp.headers.get('content-type', '').startswith('application/json') else {}
+                return jsonify({"error": error_detail.get("detail", {}).get("message", "Generation failed")}), 500
+            audio_content = resp.content
+            content_type = "audio/mpeg"
+        else:
+            # Fallback: Google Cloud Text-to-Speech
+            from google.cloud import texttospeech
+            tts_client = texttospeech.TextToSpeechClient()
+
+            # Map demo voice IDs to Google Cloud TTS voice names
+            gcp_voice_map = {
+                'demo-rachel': ('en-US-Studio-O', texttospeech.SsmlVoiceGender.FEMALE),
+                'demo-drew': ('en-US-Studio-M', texttospeech.SsmlVoiceGender.MALE),
+                'demo-clyde': ('en-US-Studio-Q', texttospeech.SsmlVoiceGender.MALE),
+                'demo-domi': ('en-US-Neural2-F', texttospeech.SsmlVoiceGender.FEMALE),
+                'demo-bella': ('en-US-Neural2-C', texttospeech.SsmlVoiceGender.FEMALE),
+                'demo-antoni': ('en-US-Neural2-D', texttospeech.SsmlVoiceGender.MALE),
+            }
+            voice_name, gender = gcp_voice_map.get(voice_id, ('en-US-Studio-M', texttospeech.SsmlVoiceGender.MALE))
+
+            synthesis_input = texttospeech.SynthesisInput(text=clean_text)
+            voice_params = texttospeech.VoiceSelectionParams(
+                language_code="en-US",
+                name=voice_name,
+                ssml_gender=gender
+            )
+            audio_config = texttospeech.AudioConfig(
+                audio_encoding=texttospeech.AudioEncoding.MP3,
+                speaking_rate=0.95,
+                pitch=0.0,
+            )
+            tts_resp = tts_client.synthesize_speech(
+                input=synthesis_input, voice=voice_params, audio_config=audio_config
+            )
+            audio_content = tts_resp.audio_content
+            content_type = "audio/mpeg"
+
         # Upload audio to GCS and return URL
-        import uuid
         audio_filename = f"voiceover/{uuid.uuid4().hex}.mp3"
         bucket = storage_client.bucket(STORAGE_BUCKET)
         blob = bucket.blob(audio_filename)
-        blob.upload_from_string(resp.content, content_type="audio/mpeg")
+        blob.upload_from_string(audio_content, content_type=content_type)
         blob.make_public()
         audio_url = blob.public_url
         return jsonify({"audioUrl": audio_url})
     except Exception as e:
-        print(f"ElevenLabs generate proxy error: {e}")
+        print(f"ElevenLabs/TTS generate proxy error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
