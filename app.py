@@ -74,6 +74,12 @@ COLLECTIONS = {
     'users': f'{COLLECTION_PREFIX}doc_users',
 }
 
+VALID_ROLES = [
+    'exec_producer', 'series_producer', 'production_manager', 'line_producer',
+    'producer', 'ap', 'researcher', 'editor', 'archive_producer', 'legal',
+    'archivist', 'ai_director', 'ai_generator',
+]
+
 SEED_USERS = [
     {
         'username': 'Felix',
@@ -3362,9 +3368,18 @@ def create_compliance_item():
         if not data.get('episodeId'):
             return jsonify({"error": "episodeId is required"}), 400
 
-        # Compliance item types: source_citation, archive_license, exif_metadata, legal_signoff
-        data['itemType'] = data.get('itemType', 'source_citation')
-        data['status'] = data.get('status', 'pending')  # pending, verified, flagged
+        # Compliance item types (supports both legacy and new frontend categories):
+        #   Legacy: source_citation, archive_license, exif_metadata, legal_signoff
+        #   Frontend: archive_clearance, fact_check, contributor_release, compliance_signoff
+        valid_types = [
+            'source_citation', 'archive_license', 'exif_metadata', 'legal_signoff',
+            'archive_clearance', 'fact_check', 'contributor_release', 'compliance_signoff',
+        ]
+        item_type = data.get('itemType', 'source_citation')
+        if item_type not in valid_types:
+            return jsonify({"error": f"Invalid itemType. Must be one of: {valid_types}"}), 400
+        data['itemType'] = item_type
+        data['status'] = data.get('status', 'pending')  # pending, verified, flagged, cleared, confirmed
 
         item = create_doc('compliance_items', data)
         return jsonify(item), 201
@@ -3390,18 +3405,24 @@ def export_compliance_package(episode_id):
         items = get_docs_by_episode('compliance_items', episode_id)
         episode = get_doc('episodes', episode_id)
 
-        # Group by type
+        # Group by type (supports both legacy and new frontend categories)
         package = {
             'episodeId': episode_id,
             'episodeTitle': episode.get('title', 'Unknown') if episode else 'Unknown',
             'exportedAt': datetime.utcnow().isoformat(),
+            # Legacy categories
             'sourceCitations': [i for i in items if i.get('itemType') == 'source_citation'],
             'archiveLicenses': [i for i in items if i.get('itemType') == 'archive_license'],
             'exifMetadata': [i for i in items if i.get('itemType') == 'exif_metadata'],
             'legalSignoffs': [i for i in items if i.get('itemType') == 'legal_signoff'],
+            # Frontend categories (Legal & Compliance 4-tab model)
+            'archiveClearances': [i for i in items if i.get('itemType') == 'archive_clearance'],
+            'factChecks': [i for i in items if i.get('itemType') == 'fact_check'],
+            'contributorReleases': [i for i in items if i.get('itemType') == 'contributor_release'],
+            'complianceSignoffs': [i for i in items if i.get('itemType') == 'compliance_signoff'],
             'summary': {
                 'totalItems': len(items),
-                'verified': sum(1 for i in items if i.get('status') == 'verified'),
+                'verified': sum(1 for i in items if i.get('status') in ('verified', 'cleared', 'confirmed')),
                 'pending': sum(1 for i in items if i.get('status') == 'pending'),
                 'flagged': sum(1 for i in items if i.get('status') == 'flagged')
             }
@@ -4661,6 +4682,22 @@ def get_users():
     return jsonify(users)
 
 
+@app.route("/api/users", methods=["POST"])
+def create_user():
+    """Create a new user profile."""
+    data = request.get_json()
+    if not data.get('username'):
+        return jsonify({"error": "username is required"}), 400
+    role = data.get('role', 'researcher')
+    if role not in VALID_ROLES:
+        return jsonify({"error": f"Invalid role. Must be one of: {VALID_ROLES}"}), 400
+    data['role'] = role
+    if not data.get('avatar'):
+        data['avatar'] = f"https://api.dicebear.com/7.x/avataaars/svg?seed={data['username']}"
+    user = create_doc('users', data)
+    return jsonify(user), 201
+
+
 @app.route("/api/users/<user_id>", methods=["PUT"])
 def update_user(user_id):
     """Update a user profile."""
@@ -4682,6 +4719,190 @@ def seed_users():
         created.append(user)
 
     return jsonify(created), 201
+
+
+# ============== Email Briefs ==============
+
+
+@app.route("/api/email-briefs", methods=["POST"])
+def email_briefs():
+    """Email B-Roll Briefs to the production team."""
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    try:
+        data = request.get_json()
+        project_title = data.get('project_title', 'Untitled')
+        recipients = data.get('recipients', [])
+        briefs = data.get('briefs', [])
+
+        if not recipients or not briefs:
+            return jsonify({"error": "recipients and briefs are required"}), 400
+
+        # Build HTML email body
+        brief_rows = ""
+        for i, brief in enumerate(briefs, 1):
+            prompts_html = ""
+            for p in brief.get('prompts', []):
+                target = p.get('target', 'image').upper()
+                badge_color = '#e53e3e' if target == 'VIDEO' else '#4299e1'
+                prompts_html += f"""
+                <div style="margin:8px 0;padding:10px;background:#f7f7f7;border-radius:6px;">
+                    <span style="display:inline-block;padding:2px 8px;border-radius:4px;background:{badge_color};color:white;font-size:11px;font-weight:bold;">{target}</span>
+                    <p style="margin:6px 0 2px;color:#333;">{p.get('prompt', '')}</p>
+                    {'<p style="margin:0;color:#888;font-size:12px;">Camera: ' + p.get('camera_motion', '') + ' | Duration: ' + p.get('duration_guidance', '') + '</p>' if target == 'VIDEO' else ''}
+                    <p style="margin:0;color:#888;font-size:12px;">Aspect: {p.get('aspect_ratio', '16:9')}</p>
+                </div>"""
+
+            brief_rows += f"""
+            <div style="margin:16px 0;padding:16px;border:1px solid #ddd;border-radius:8px;">
+                <h3 style="margin:0 0 8px;color:#e53e3e;">Brief {i}: {brief.get('beat_id', '')}</h3>
+                <p><strong>Gap:</strong> {brief.get('gap_description', '')}</p>
+                <p><strong>Narrative Context:</strong> {brief.get('narrative_context', '')}</p>
+                <p><strong>Style Notes:</strong> {brief.get('style_notes', '')}</p>
+                <h4 style="margin:12px 0 4px;">Prompts</h4>
+                {prompts_html}
+            </div>"""
+
+        html = f"""
+        <div style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;">
+            <div style="background:#1a1a1a;padding:20px;border-radius:8px 8px 0 0;">
+                <h1 style="color:#e53e3e;margin:0;">AiM B-Roll Briefs</h1>
+                <p style="color:#a0a0a0;margin:4px 0 0;">Project: {project_title} | {len(briefs)} brief(s)</p>
+            </div>
+            <div style="padding:20px;background:#ffffff;border:1px solid #ddd;border-top:none;border-radius:0 0 8px 8px;">
+                {brief_rows}
+                <hr style="border:none;border-top:1px solid #eee;margin:20px 0;">
+                <p style="color:#888;font-size:12px;">Generated by AiM Documentary Studio</p>
+            </div>
+        </div>"""
+
+        # Send email
+        smtp_host = os.environ.get('SMTP_HOST', '')
+        smtp_port = int(os.environ.get('SMTP_PORT', '587'))
+        smtp_user = os.environ.get('SMTP_USER', '')
+        smtp_pass = os.environ.get('SMTP_PASS', '')
+        sender = os.environ.get('EMAIL_SENDER', 'aim-studio@arrowmedia.com')
+
+        if not smtp_host:
+            # No SMTP configured — store the brief email in Firestore for retrieval
+            email_record = create_doc('feedback', {
+                'type': 'email_brief',
+                'projectTitle': project_title,
+                'recipients': recipients,
+                'briefCount': len(briefs),
+                'html': html,
+                'status': 'queued_no_smtp',
+            })
+            return jsonify({
+                "success": True,
+                "message": f"{len(briefs)} brief(s) queued (SMTP not configured — stored for manual sending)",
+                "email_id": email_record.get('id'),
+                "smtp_configured": False
+            })
+
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = f'[AiM] B-Roll Briefs: {project_title} ({len(briefs)} briefs)'
+        msg['From'] = sender
+        msg['To'] = ', '.join(recipients)
+        msg.attach(MIMEText(html, 'html'))
+
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(sender, recipients, msg.as_string())
+
+        return jsonify({
+            "success": True,
+            "message": f"{len(briefs)} brief(s) emailed to {', '.join(recipients)}",
+            "smtp_configured": True
+        })
+
+    except Exception as e:
+        print(f"[ERROR] Email briefs failed: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ============== Planning Persistence Endpoints ==============
+
+
+@app.route("/api/projects/<project_id>/brief", methods=["GET"])
+def get_project_brief(project_id):
+    """Get the development brief for a project."""
+    try:
+        project = get_doc('projects', project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        return jsonify(project.get('brief', {}))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/projects/<project_id>/brief", methods=["POST"])
+def save_project_brief(project_id):
+    """Save or update the development brief for a project."""
+    try:
+        data = request.get_json()
+        project = get_doc('projects', project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        update_doc('projects', project_id, {'brief': data})
+        return jsonify({"success": True, "brief": data})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/projects/<project_id>/bible", methods=["GET"])
+def get_project_bible(project_id):
+    """Get the series bible for a project."""
+    try:
+        project = get_doc('projects', project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        return jsonify(project.get('bible', {}))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/projects/<project_id>/bible", methods=["POST"])
+def save_project_bible(project_id):
+    """Save or update the series bible for a project."""
+    try:
+        data = request.get_json()
+        project = get_doc('projects', project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        update_doc('projects', project_id, {'bible': data})
+        return jsonify({"success": True, "bible": data})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/episodes/<episode_id>/structure", methods=["GET"])
+def get_episode_structure(episode_id):
+    """Get the episode structure (parts and segments)."""
+    try:
+        episode = get_doc('episodes', episode_id)
+        if not episode:
+            return jsonify({"error": "Episode not found"}), 404
+        return jsonify(episode.get('structure', []))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/episodes/<episode_id>/structure", methods=["POST"])
+def save_episode_structure(episode_id):
+    """Save or update the episode structure (parts and segments)."""
+    try:
+        data = request.get_json()
+        episode = get_doc('episodes', episode_id)
+        if not episode:
+            return jsonify({"error": "Episode not found"}), 404
+        update_doc('episodes', episode_id, {'structure': data})
+        return jsonify({"success": True, "structure": data})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ============== Missing Frontend Endpoints ==============
