@@ -1,34 +1,36 @@
 steps:
+  # Step 1: Build Docker image for phone-ui service
   - name: 'gcr.io/cloud-builders/docker'
+    id: 'build'
     args:
       - 'build'
       - '-t'
-      - 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run/doc-production-app:latest'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run/doc-production-app-phone-ui:latest'
       - '.'
 
+  # Step 2: Push Docker image
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run/doc-production-app:latest']
-
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: gcloud
+    id: 'push'
     args:
-      - 'run'
-      - 'deploy'
-      - 'doc-production-app'
-      - '--image'
-      - 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run/doc-production-app:latest'
-      - '--region'
-      - 'us-central1'
-      - '--platform'
-      - 'managed'
-      - '--allow-unauthenticated'
-      - '--set-env-vars'
-      - 'GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=us-central1,STORAGE_BUCKET=$PROJECT_ID-doc-assets'
-      - '--memory'
-      - '1Gi'
+      - 'push'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run/doc-production-app-phone-ui:latest'
 
-images:
-  - 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run/doc-production-app:latest'
+  # Step 3: Deploy to Cloud Run as separate service
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud run deploy doc-production-app-phone-ui \
+          --image "us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run/doc-production-app-phone-ui:latest" \
+          --region us-central1 \
+          --platform managed \
+          --allow-unauthenticated \
+          --set-env-vars "GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=us-central1,STORAGE_BUCKET=$PROJECT_ID-doc-assets-phoneui,APP_ENV=phoneui,APP_VERSION=phone-ui-$SHORT_SHA" \
+          --memory 2Gi \
+          --timeout 3600 \
+          --cpu 2
 
 options:
   logging: CLOUD_LOGGING_ONLY

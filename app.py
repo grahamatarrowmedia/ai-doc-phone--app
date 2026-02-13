@@ -32,22 +32,28 @@ DOWNLOAD_TIMEOUT = 30
 vertexai.init(project=PROJECT_ID, location=LOCATION)
 model = GenerativeModel(MODEL_NAME)
 
+# App environment
+APP_ENV = os.environ.get("APP_ENV", "prod")
+
 # Initialize Firestore
-db = firestore.Client()
+db = firestore.Client(project=PROJECT_ID)
 
 # Initialize Cloud Storage
-storage_client = storage.Client()
+storage_client = storage.Client(project=PROJECT_ID)
 
-# Collection names
+# Collection prefix based on environment (each env uses separate collections)
+COLLECTION_PREFIX = {"dev": "dev_", "phoneui": "phoneui_"}.get(APP_ENV, "")
+
+# Collection names (prefixed by environment)
 COLLECTIONS = {
-    'projects': 'doc_projects',
-    'episodes': 'doc_episodes',
-    'research': 'doc_research',
-    'interviews': 'doc_interviews',
-    'shots': 'doc_shots',
-    'assets': 'doc_assets',
-    'scripts': 'doc_scripts',
-    'feedback': 'doc_feedback'
+    'projects': f'{COLLECTION_PREFIX}doc_projects',
+    'episodes': f'{COLLECTION_PREFIX}doc_episodes',
+    'research': f'{COLLECTION_PREFIX}doc_research',
+    'interviews': f'{COLLECTION_PREFIX}doc_interviews',
+    'shots': f'{COLLECTION_PREFIX}doc_shots',
+    'assets': f'{COLLECTION_PREFIX}doc_assets',
+    'scripts': f'{COLLECTION_PREFIX}doc_scripts',
+    'feedback': f'{COLLECTION_PREFIX}doc_feedback'
 }
 
 
