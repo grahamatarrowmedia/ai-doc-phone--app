@@ -45,10 +45,10 @@ vertexai.init(project=PROJECT_ID, location=LOCATION)
 model = GenerativeModel(MODEL_NAME)
 
 # Initialize Firestore
-db = firestore.Client()
+db = firestore.Client(project=PROJECT_ID)
 
 # Initialize Cloud Storage
-storage_client = storage.Client()
+storage_client = storage.Client(project=PROJECT_ID)
 
 # Collection prefix based on environment (dev uses separate collections)
 COLLECTION_PREFIX = "dev_" if APP_ENV == "dev" else ""
