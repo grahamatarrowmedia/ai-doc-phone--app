@@ -817,8 +817,45 @@ def get_research(project_id):
 
 @app.route("/api/research", methods=["POST"])
 def create_research():
-    """Create a new research item."""
+    """Create a new research item, or run AI research if topic+engine are present."""
     data = request.get_json()
+
+    # Detect AI research request from frontend's summarizeResearch()
+    # Frontend sends {topic, engine, systemInstruction} and expects
+    # {summary, key_facts, expert_suggestions, urls} back
+    if data.get('topic') and data.get('engine'):
+        topic = data['topic']
+        system_instruction = data.get('systemInstruction', '')
+
+        prompt = f"""Research the following topic for a documentary production.
+
+Topic: {topic}
+
+Provide comprehensive research and return ONLY a valid JSON object (no markdown fences) with:
+- "summary": string (2-3 detailed paragraphs of background research)
+- "key_facts": array of strings (5-8 key facts with source references)
+- "expert_suggestions": array of strings (3-5 expert names with their role/title to interview)
+- "urls": array of strings (relevant source URLs, use real credible sources)"""
+
+        system_prompt = system_instruction or "You are a documentary research specialist. Always respond with valid JSON only, no markdown code fences."
+
+        raw_result = generate_ai_response(prompt, system_prompt)
+        cleaned = clean_ai_response(raw_result)
+
+        try:
+            result = json.loads(cleaned)
+        except (json.JSONDecodeError, ValueError):
+            # If AI didn't return valid JSON, wrap the text response
+            result = {
+                "summary": cleaned,
+                "key_facts": [],
+                "expert_suggestions": [],
+                "urls": []
+            }
+
+        return jsonify(result)
+
+    # Standard CRUD: create a research document in Firestore
     research = create_doc('research', data)
     return jsonify(research), 201
 
