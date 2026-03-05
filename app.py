@@ -171,7 +171,11 @@ def get_all_docs(collection_name, project_id=None):
     """Get all documents from a collection, optionally filtered by project."""
     collection = db.collection(COLLECTIONS[collection_name])
     if project_id:
-        docs = collection.where('projectId', '==', project_id).stream()
+        # Try camelCase first, then snake_case, merge & deduplicate
+        camel_docs = {doc.id: doc_to_dict(doc) for doc in collection.where('projectId', '==', project_id).stream()}
+        snake_docs = {doc.id: doc_to_dict(doc) for doc in collection.where('project_id', '==', project_id).stream()}
+        merged = {**snake_docs, **camel_docs}
+        return list(merged.values())
     else:
         docs = collection.stream()
     return [doc_to_dict(doc) for doc in docs]
@@ -861,6 +865,15 @@ def get_shots(project_id):
 def create_shot():
     """Create a new shot."""
     data = request.get_json()
+    # Dual-write both camelCase and snake_case for project/episode IDs
+    if 'projectId' in data:
+        data['project_id'] = data['projectId']
+    elif 'project_id' in data:
+        data['projectId'] = data['project_id']
+    if 'episodeId' in data:
+        data['episode_id'] = data['episodeId']
+    elif 'episode_id' in data:
+        data['episodeId'] = data['episode_id']
     shot = create_doc('shots', data)
     return jsonify(shot), 201
 
@@ -869,6 +882,15 @@ def create_shot():
 def update_shot(shot_id):
     """Update a shot."""
     data = request.get_json()
+    # Dual-write both camelCase and snake_case for project/episode IDs
+    if 'projectId' in data:
+        data['project_id'] = data['projectId']
+    elif 'project_id' in data:
+        data['projectId'] = data['project_id']
+    if 'episodeId' in data:
+        data['episode_id'] = data['episodeId']
+    elif 'episode_id' in data:
+        data['episodeId'] = data['episode_id']
     shot = update_doc('shots', shot_id, data)
     return jsonify(shot)
 
@@ -1479,6 +1501,15 @@ def get_scripts(project_id):
 def create_script():
     """Create a new script."""
     data = request.get_json()
+    # Dual-write both camelCase and snake_case for project/episode IDs
+    if 'projectId' in data:
+        data['project_id'] = data['projectId']
+    elif 'project_id' in data:
+        data['projectId'] = data['project_id']
+    if 'episodeId' in data:
+        data['episode_id'] = data['episodeId']
+    elif 'episode_id' in data:
+        data['episodeId'] = data['episode_id']
     script = create_doc('scripts', data)
     return jsonify(script), 201
 
@@ -1487,6 +1518,15 @@ def create_script():
 def update_script(script_id):
     """Update a script."""
     data = request.get_json()
+    # Dual-write both camelCase and snake_case for project/episode IDs
+    if 'projectId' in data:
+        data['project_id'] = data['projectId']
+    elif 'project_id' in data:
+        data['projectId'] = data['project_id']
+    if 'episodeId' in data:
+        data['episode_id'] = data['episodeId']
+    elif 'episode_id' in data:
+        data['episodeId'] = data['episode_id']
     script = update_doc('scripts', script_id, data)
     return jsonify(script)
 
@@ -1496,6 +1536,77 @@ def delete_script(script_id):
     """Delete a script."""
     delete_doc('scripts', script_id)
     return jsonify({"success": True})
+
+
+@app.route("/api/projects/<project_id>/seed-nasa-scripts", methods=["POST"])
+def seed_nasa_scripts(project_id):
+    """Seed NASA episode scripts into a project. Idempotent — skips episodes that already have scripts."""
+    try:
+        data = request.get_json() or {}
+        episodes_data = data.get('episodes', [])
+
+        if not episodes_data:
+            return jsonify({"error": "No episodes provided"}), 400
+
+        # Get existing scripts for this project
+        existing_scripts = get_all_docs('scripts', project_id)
+        existing_episode_ids = {s.get('episodeId') or s.get('episode_id') for s in existing_scripts if s}
+
+        # Get existing episodes
+        existing_episodes = get_all_docs('episodes', project_id)
+        existing_ep_numbers = {e.get('episode_number'): e for e in existing_episodes if e}
+
+        created_episodes = 0
+        created_scripts = 0
+
+        for ep_data in episodes_data:
+            ep_number = ep_data.get('episode_number', 0)
+            ep_title = ep_data.get('title', f'Episode {ep_number}')
+            script_content = ep_data.get('script', {})
+
+            # Create episode if it doesn't exist
+            if ep_number in existing_ep_numbers:
+                episode = existing_ep_numbers[ep_number]
+                episode_id = episode.get('id')
+            else:
+                episode = create_doc('episodes', {
+                    'projectId': project_id,
+                    'project_id': project_id,
+                    'episode_number': ep_number,
+                    'title': ep_title,
+                    'focus': ep_data.get('focus', ''),
+                    'status': 'planned',
+                })
+                episode_id = episode.get('id')
+                created_episodes += 1
+
+            # Skip if episode already has a script
+            if episode_id in existing_episode_ids:
+                continue
+
+            # Create script for this episode
+            script_doc = {
+                'projectId': project_id,
+                'project_id': project_id,
+                'episodeId': episode_id,
+                'episode_id': episode_id,
+                'title': ep_title,
+                'version': 1,
+                'status': 'draft',
+                'parts': script_content.get('parts', []),
+            }
+            create_doc('scripts', script_doc)
+            created_scripts += 1
+
+        return jsonify({
+            "success": True,
+            "created_episodes": created_episodes,
+            "created_scripts": created_scripts,
+            "skipped": len(episodes_data) - created_scripts,
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ============== Feedback Routes ==============
