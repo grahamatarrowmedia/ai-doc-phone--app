@@ -35,7 +35,6 @@ steps:
   # Step 2: Build Docker image with commit SHA + latest tags
   - name: 'gcr.io/cloud-builders/docker'
     id: 'build'
-    entrypoint: 'bash'
     args:
       - '-c'
       - |
@@ -50,7 +49,6 @@ steps:
   # Step 3: Push both image tags
   - name: 'gcr.io/cloud-builders/docker'
     id: 'push'
-    entrypoint: 'bash'
     args:
       - '-c'
       - |

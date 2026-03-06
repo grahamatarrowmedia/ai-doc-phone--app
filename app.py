@@ -61,8 +61,8 @@ db = firestore.Client(project=PROJECT_ID)
 # Initialize Cloud Storage
 storage_client = storage.Client(project=PROJECT_ID)
 
-# Collection prefix based on environment (dev uses separate collections)
-COLLECTION_PREFIX = "dev_" if APP_ENV == "dev" else ""
+# Collection prefix based on environment (each env uses separate collections)
+COLLECTION_PREFIX = {"dev": "dev_", "samworkflow": "samwf_"}.get(APP_ENV, "")
 
 # Collection names (prefixed by environment)
 COLLECTIONS = {
