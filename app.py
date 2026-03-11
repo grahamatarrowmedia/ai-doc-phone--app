@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 load_dotenv()  # Load .env file for local development
 
+import functools
 import requests
 from flask import Flask, render_template, request, jsonify, Response, send_from_directory
 from flask_cors import CORS
@@ -22,13 +23,69 @@ from weasyprint import HTML
 import vertexai
 from vertexai.generative_models import GenerativeModel, Part, Tool, grounding
 from google.cloud.aiplatform_v1beta1 import Tool as GapicTool
+import firebase_admin
+from firebase_admin import auth as firebase_auth
+
+# Initialize Firebase Admin (uses Application Default Credentials on Cloud Run)
+firebase_admin.initialize_app()
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB upload limit
+
+# CORS: only allow known origins (localhost dev + this project's Cloud Run services)
+GCP_PROJECT_NUM = os.environ.get("GCP_PROJECT_NUM", "280939464794")
 CORS(app, origins=[
     "http://localhost:3000",
     "http://localhost:5173",
-    r"https://.*\.run\.app",
+    rf"https://aim-documentary-studio-{GCP_PROJECT_NUM}\.us-central1\.run\.app",
+    rf"https://doc-production-app-{GCP_PROJECT_NUM}\.us-central1\.run\.app",
 ])
+
+
+# ============== Firebase Auth Middleware ==============
+
+# Routes that don't require authentication (health checks, static)
+PUBLIC_ROUTES = {'/api/health', '/health', '/'}
+
+def require_firebase_auth(f):
+    """Decorator that verifies Firebase ID token from Authorization header.
+    Sets request.firebase_user with the decoded token on success."""
+    @functools.wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return jsonify({"error": "Missing or invalid Authorization header"}), 401
+        id_token = auth_header.split('Bearer ', 1)[1]
+        try:
+            decoded = firebase_auth.verify_id_token(id_token)
+            request.firebase_user = decoded
+        except Exception as e:
+            return jsonify({"error": f"Invalid token: {str(e)}"}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
+@app.before_request
+def check_auth():
+    """Global auth check — verify Firebase token on all /api/ routes.
+    Skip public routes and OPTIONS (CORS preflight)."""
+    if request.method == 'OPTIONS':
+        return None
+    if request.path in PUBLIC_ROUTES:
+        return None
+    if not request.path.startswith('/api/'):
+        return None
+    # Check for valid Firebase token
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return jsonify({"error": "Authentication required"}), 401
+    id_token = auth_header.split('Bearer ', 1)[1]
+    try:
+        decoded = firebase_auth.verify_id_token(id_token)
+        request.firebase_user = decoded
+    except Exception:
+        return jsonify({"error": "Invalid or expired token"}), 401
+    return None
 
 # Configuration
 PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "your-project-id")
@@ -773,7 +830,8 @@ def clean_ai_response(text):
 
 
 def generate_ai_response(prompt, system_prompt="", model_name=None, generation_config=None):
-    """Generate AI response using Vertex AI. Pass model_name to use a specific model for this call."""
+    """Generate AI response using Vertex AI. Pass model_name to use a specific model for this call.
+    Raises RuntimeError on failure instead of returning an error string."""
     try:
         full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
         active_model = GenerativeModel(model_name) if model_name else model
@@ -781,7 +839,7 @@ def generate_ai_response(prompt, system_prompt="", model_name=None, generation_c
         response = active_model.generate_content(full_prompt, generation_config=config)
         return response.text
     except Exception as e:
-        return f"AI error: {str(e)}"
+        raise RuntimeError(f"AI generation failed: {str(e)}") from e
 
 
 def generate_grounded_research(prompt, system_prompt=""):
@@ -815,13 +873,13 @@ def validate_url(url, timeout=3):
         }
         response = requests.head(url, headers=headers, timeout=timeout, allow_redirects=True)
         return response.status_code < 400
-    except:
+    except Exception:
         # Try GET if HEAD fails (some servers don't support HEAD)
         try:
             response = requests.get(url, headers=headers, timeout=timeout, stream=True)
             response.close()
             return response.status_code < 400
-        except:
+        except Exception:
             return False
 
 
@@ -2063,17 +2121,22 @@ def submit_feedback():
 
             screenshot_note = '<p style="color:#888;font-size:12px;"><em>Screenshot attached</em></p>' if screenshot_base64 else ''
 
+            from markupsafe import escape
+            safe_feedback = escape(feedback_text)
+            safe_name = escape(feedback_doc.get('name', 'Anonymous'))
+            safe_type = escape(feedback_type.upper())
+
             html_body = f"""
             <div style="font-family:Arial,sans-serif;max-width:700px;margin:0 auto;">
                 <div style="background:#1a1a1a;padding:20px;border-radius:8px 8px 0 0;">
                     <h1 style="color:#e53e3e;margin:0;font-size:20px;">AiM Feedback Report</h1>
-                    <p style="color:#a0a0a0;margin:4px 0 0;font-size:13px;">Type: {feedback_type.upper()}</p>
+                    <p style="color:#a0a0a0;margin:4px 0 0;font-size:13px;">Type: {safe_type}</p>
                 </div>
                 <div style="padding:20px;background:#ffffff;border:1px solid #ddd;border-top:none;border-radius:0 0 8px 8px;">
-                    <p><strong>From:</strong> {feedback_doc.get('name', 'Anonymous')}</p>
+                    <p><strong>From:</strong> {safe_name}</p>
                     <p><strong>Description:</strong></p>
                     <div style="background:#f7f7f7;padding:12px;border-radius:6px;margin:8px 0;">
-                        {feedback_text}
+                        {safe_feedback}
                     </div>
                     {f'<p><strong>Project:</strong> {project_title}</p>' if project_title else ''}
                     {f'<p><strong>Phase:</strong> {current_tab}</p>' if current_tab else ''}
@@ -3204,10 +3267,19 @@ Return ONLY the JSON object as specified."""
 
 # ============== Document Serving Routes ==============
 
+def _validate_blob_path(blob_path):
+    """Reject path traversal attempts in GCS blob paths."""
+    if '..' in blob_path or blob_path.startswith('/'):
+        return False
+    return True
+
+
 @app.route("/api/document/<path:blob_path>")
 def get_document(blob_path):
     """Serve a document from GCS (inline viewing)."""
     try:
+        if not _validate_blob_path(blob_path):
+            return jsonify({"error": "Invalid path"}), 400
         bucket = storage_client.bucket(STORAGE_BUCKET)
         blob = bucket.blob(blob_path)
 
@@ -3230,6 +3302,8 @@ def get_document(blob_path):
 def download_document(blob_path):
     """Download a document from GCS (attachment)."""
     try:
+        if not _validate_blob_path(blob_path):
+            return jsonify({"error": "Invalid path"}), 400
         bucket = storage_client.bucket(STORAGE_BUCKET)
         blob = bucket.blob(blob_path)
 
@@ -6242,6 +6316,8 @@ def api_gcs_serve():
     gcs_path = request.args.get("path", "")
     if not gcs_path:
         return jsonify({"error": "Missing path parameter"}), 400
+    if not _validate_blob_path(gcs_path):
+        return jsonify({"error": "Invalid path"}), 400
     try:
         bucket = storage_client.bucket(STORAGE_BUCKET)
         blob = bucket.blob(gcs_path)
@@ -9757,7 +9833,7 @@ Make it production-ready — a producer should be able to hand this to an editor
 @app.route("/api/notifications", methods=["POST"])
 def create_notification():
     """Create a new notification."""
-    data = request.get_json()
+    data = request.get_json() or {}
     required = ['recipientId', 'senderId', 'senderName', 'type', 'title', 'message']
     for field in required:
         if field not in data:
@@ -9803,6 +9879,8 @@ def get_notifications(user_id):
 def mark_notification_read(notif_id):
     """Mark a single notification as read."""
     doc_ref = db.collection(COLLECTIONS['notifications']).document(notif_id)
+    if not doc_ref.get().exists:
+        return jsonify({"error": "Notification not found"}), 404
     doc_ref.update({
         'read': True,
         'updatedAt': datetime.utcnow().isoformat(),
@@ -10249,12 +10327,21 @@ def get_script_profile(series_id):
 
 # ============== Beat Sheet Routes (Episode Development) ==============
 
+BEAT_SHEET_ALLOWED_FIELDS = {
+    'projectId', 'seriesId', 'episodeNumber', 'episodeTitle',
+    'topic', 'theme', 'subjects', 'beats', 'conversation',
+    'status', 'targetDuration', 'template_id',
+}
+
+
 @app.route("/api/beat-sheets", methods=["POST"])
 def save_beat_sheet():
     """Save or update a beat sheet (upsert by id)."""
     try:
-        data = request.get_json() or {}
-        sheet_id = data.get('id')
+        raw = request.get_json() or {}
+        # Filter to allowed fields only — prevent injection of arbitrary metadata
+        data = {k: v for k, v in raw.items() if k in BEAT_SHEET_ALLOWED_FIELDS}
+        sheet_id = raw.get('id')
         if sheet_id:
             existing = get_doc('beat_sheets', sheet_id)
             if existing:
